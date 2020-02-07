@@ -1,0 +1,6 @@
+[submodule "riscv_isa"]
+	path = riscv_isa
+	url = https://github.com/Cytosine1999/riscv-isa
+[submodule "elf"]
+	path = elf
+	url = https://github.com/Cytosine1999/elf
