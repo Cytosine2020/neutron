@@ -1,89 +1,10 @@
-#include <iostream>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 
-#include "target/hart.hpp"
-#include "target/dump.hpp"
+#include "riscv_linux.hpp"
 
-using namespace riscv_isa;
-
-#include "elf_header.hpp"
-
-using namespace elf;
-
-
-class LinuxHart : public Hart<LinuxHart> {
-public:
-    LinuxHart(XLenT pc, IntegerRegister<> &reg, Memory<> &mem) : Hart{pc, reg, mem} {}
-
-    void start() {
-        while (true) {
-            Instruction *inst = mem.address<Instruction>(get_pc());
-
-            switch (inst == nullptr ? MEMORY_ERROR : visit(inst)) {
-                case ILLEGAL_INSTRUCTION_EXCEPTION:
-                    if (inst == nullptr)
-                        riscv_isa_unreachable("illegal instruction exception instruction fetch failed!");
-
-                    std::cerr << "Illegal instruction at " << std::hex << get_pc() << ' ' << *inst << std::endl;
-
-                    return;
-                case MEMORY_ERROR:
-                    std::cerr << "Memory error at " << std::hex << get_pc() << std::endl;
-
-                    return;
-                case INSTRUCTION_ADDRESS_MISALIGNED_EXCEPTION:
-                    std::cerr << "Instruction address misaligned at " << std::hex << get_pc() << ' '
-                              << *reinterpret_cast<u32 *>(inst) << std::endl;
-
-                    return;
-                case ECALL:
-                    switch (int_reg.get_x(IntegerRegister<>::A7)) {
-                        case 57: {
-                            int fd = int_reg.get_x(IntegerRegister<>::A0);
-                            int_reg.set_x(IntegerRegister<>::A0, fd > 2 ? close(fd) : 0); // todo: stdin, stdout, stderr
-
-                            break;
-                        }
-                        case 64:
-                            int_reg.set_x(IntegerRegister<>::A0, write(int_reg.get_x(IntegerRegister<>::A0),
-                                                                       mem.address<char>(
-                                                                               int_reg.get_x(IntegerRegister<>::A1)),
-                                                                       IntegerRegister<>::A3));
-
-                            break;
-                        case 80:
-                            int_reg.set_x(IntegerRegister<>::A0, -1); // todo: need convert
-
-                            break;
-                        case 93:
-                            std::cout << std::endl << "[exit " << int_reg.get_x(IntegerRegister<>::A0) << ']'
-                                      << std::endl;
-
-                            return;
-                        case 214:
-
-                            break;
-                        default:
-                            std::cerr << "Invalid ecall number at " << std::hex << get_pc()
-                                      << ", call number " << std::dec << int_reg.get_x(IntegerRegister<>::A7)
-                                      << std::endl;
-
-                            return;
-                    }
-                    inc_pc(ECALLInst::INST_WIDTH);
-
-                    break;
-                case EBREAK:
-                    inc_pc(ECALLInst::INST_WIDTH);
-
-                    break;
-                default:;
-            }
-        }
-    }
-};
+using namespace neutron;
 
 
 int main(int argc, char **argv) {
@@ -117,13 +38,13 @@ int main(int argc, char **argv) {
     IntegerRegister<> reg{};
     reg.set_x(IntegerRegister<>::SP, 0xfffff000);
 
-    Memory<> mem{0x100000000};
+    LinuxMemory<> mem{0x100000000};
 
     for (auto &program: elf_header->programs(visitor)) {
 //        std::cout << program << std::endl;
 
         if (program.type == ELF32ProgramHeader::LOADABLE)
-            mem.memory_copy(program.virtual_address, static_cast<u8 *>(file) + program.offset, program.file_size);
+            mem.memory_map(program.virtual_address, static_cast<u8 *>(file) + program.offset, program.file_size);
     }
 
 //    ELF32StringTableHeader *string_table_header = nullptr;
