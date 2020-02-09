@@ -10,17 +10,17 @@ using namespace neutron;
 int main(int argc, char **argv) {
     if (argc != 2) riscv_isa_abort("receive one file name!");
 
-    int fd = open(argv[1], O_RDONLY);
+    usize page_size = sysconf(_SC_PAGE_SIZE);
+
+    int fd = open(argv[1], O_RDONLY | O_SHLOCK);
     if (fd == -1) riscv_isa_abort("open file failed!");
 
     struct stat file_stat{};
     if (fstat(fd, &file_stat) != 0) riscv_isa_abort("fstat file failed!");
     usize size = file_stat.st_size;
 
-    void *file = mmap(nullptr, size, PROT_READ, MAP_SHARED, fd, 0);
+    void *file = mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);
     if (file == MAP_FAILED) riscv_isa_abort("Memory mapped io failed!");
-
-    if (close(fd) != 0) riscv_isa_abort("Close file failed!");
 
     MappedFileVisitor visitor{file, size};
 
@@ -35,16 +35,52 @@ int main(int argc, char **argv) {
     if (section_header_string_table_header == nullptr) riscv_isa_abort("Broken section header string table!");
 //    auto section_header_string_table = section_header_string_table_header->get_string_table(visitor);
 
-    IntegerRegister<> reg{};
-    reg.set_x(IntegerRegister<>::SP, 0xfffff000);
-
-    LinuxMemory<> mem{0x100000000};
+    LinuxMemory<> mem{};
 
     for (auto &program: elf_header->programs(visitor)) {
 //        std::cout << program << std::endl;
 
-        if (program.type == ELF32ProgramHeader::LOADABLE)
-            mem.memory_map(program.virtual_address, static_cast<u8 *>(file) + program.offset, program.file_size);
+        auto *loadable = ELF32ProgramHeader::cast<ELF32ExecutableHeader>(&program, visitor);
+
+        if (loadable != nullptr) {
+            u32 file_size = loadable->file_size < loadable->mem_size ? loadable->file_size : loadable->mem_size;
+            u32 mem_size = loadable->mem_size;
+
+            u32 file_page = file_size == 0 ? 0 : (file_size - 1) / page_size + 1;
+            u32 mem_page = mem_size == 0 ? 0 : (mem_size - 1) / page_size + 1;
+
+            if (mem_page >= xlen_trait::UXLenMax / page_size) riscv_isa_abort("ELF file broken!");
+
+            u32 file_map = file_page * page_size;
+            u32 mem_map = mem_page * page_size;
+
+            bool execute = loadable->is_execute();
+            bool write = loadable->is_write();
+            bool read = loadable->is_read();
+
+            void *mem_ptr = mmap(nullptr, mem_map, PROT_WRITE | PROT_READ, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
+            if (mem_ptr == MAP_FAILED) riscv_isa_abort("Loading program failed!");
+
+            if (mmap(mem_ptr, file_map, PROT_WRITE | PROT_READ, MAP_PRIVATE | MAP_FIXED, fd, program.offset) != mem_ptr)
+                riscv_isa_abort("Loading program failed!");
+
+            if (file_map > file_size) memset(static_cast<u8 *>(mem_ptr) + file_size, 0, file_map - file_size);
+
+            mprotect(mem_ptr, mem_map, write ? PROT_WRITE | PROT_READ : PROT_READ);
+
+            LinuxMemory<>::MemoryProtection guest_protect;
+
+            if (execute) {
+                if (write) guest_protect = LinuxMemory<>::EXECUTE_READ_WRITE;
+                else if (read) guest_protect = LinuxMemory<>::EXECUTE_READ;
+                else guest_protect = LinuxMemory<>::EXECUTE;
+            } else {
+                if (write) guest_protect = LinuxMemory<>::READ_WRITE;
+                else guest_protect = LinuxMemory<>::READ;
+            }
+
+            mem.add_map(loadable->virtual_address, mem_ptr, mem_map, guest_protect);
+        }
     }
 
 //    ELF32StringTableHeader *string_table_header = nullptr;
@@ -77,6 +113,22 @@ int main(int argc, char **argv) {
 //        }
 //    }
 
+    constexpr u32 STACK_TOP = 0xBFFF0000;
+    constexpr u32 STACK_SIZE = 0xA00000;
+
+    void *stack = mmap(nullptr, STACK_SIZE, PROT_WRITE | PROT_READ, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
+    if (stack == MAP_FAILED) riscv_isa_abort("Loading program failed!");
+
+    mem.add_map(STACK_TOP - STACK_SIZE, stack, STACK_SIZE, LinuxMemory<>::READ_WRITE);
+
+    IntegerRegister<> reg{};
+    reg.set_x(IntegerRegister<>::SP, STACK_TOP - 0x1000);
     LinuxHart core{static_cast<xlen_trait::XLenT>(elf_header->entry_point), reg, mem};
+
+    munmap(file, size);
+
+    mem.brk_init();
     core.start();
+
+    if (close(fd) != 0) riscv_isa_abort("Close file failed!");
 }
