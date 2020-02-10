@@ -2,6 +2,8 @@
 #define NEUTRON_UNIX_STD_HPP
 
 
+#define __ARCH_WANT_NEW_STAT
+
 namespace neutron {
     namespace syscall {
         enum syscall {
