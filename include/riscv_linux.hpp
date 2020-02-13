@@ -20,40 +20,40 @@ using namespace elf;
 
 
 #define neutron_syscall_0(func, reg) \
-    reg.set_x(IntegerRegister<>::A0, func())
+    reg.set_x(IntRegT::A0, func())
 
 #define neutron_syscall_1(func, reg) \
-    reg.set_x(IntegerRegister<>::A0, func(reg.get_x(IntegerRegister<>::A0)))
+    reg.set_x(IntRegT::A0, func(reg.get_x(IntRegT::A0)))
 
 #define neutron_syscall_2(func, reg) \
-    reg.set_x(IntegerRegister<>::A0, func(reg.get_x(IntegerRegister<>::A0), \
-                                          reg.get_x(IntegerRegister<>::A1)))
+    reg.set_x(IntRegT::A0, func(reg.get_x(IntRegT::A0), \
+                                          reg.get_x(IntRegT::A1)))
 
 #define neutron_syscall_3(func, reg) \
-    reg.set_x(IntegerRegister<>::A0, func(reg.get_x(IntegerRegister<>::A0), \
-                                          reg.get_x(IntegerRegister<>::A1), \
-                                          reg.get_x(IntegerRegister<>::A2)))
+    reg.set_x(IntRegT::A0, func(reg.get_x(IntRegT::A0), \
+                                          reg.get_x(IntRegT::A1), \
+                                          reg.get_x(IntRegT::A2)))
 
 #define neutron_syscall_4(func, reg) \
-    reg.set_x(IntegerRegister<>::A0, func(reg.get_x(IntegerRegister<>::A0), \
-                                          reg.get_x(IntegerRegister<>::A1), \
-                                          reg.get_x(IntegerRegister<>::A2), \
-                                          reg.get_x(IntegerRegister<>::A3)))
+    reg.set_x(IntRegT::A0, func(reg.get_x(IntRegT::A0), \
+                                          reg.get_x(IntRegT::A1), \
+                                          reg.get_x(IntRegT::A2), \
+                                          reg.get_x(IntRegT::A3)))
 
 #define neutron_syscall_5(func, reg) \
-    reg.set_x(IntegerRegister<>::A0, func(reg.get_x(IntegerRegister<>::A0), \
-                                          reg.get_x(IntegerRegister<>::A1), \
-                                          reg.get_x(IntegerRegister<>::A2), \
-                                          reg.get_x(IntegerRegister<>::A3), \
-                                          reg.get_x(IntegerRegister<>::A4)))
+    reg.set_x(IntRegT::A0, func(reg.get_x(IntRegT::A0), \
+                                          reg.get_x(IntRegT::A1), \
+                                          reg.get_x(IntRegT::A2), \
+                                          reg.get_x(IntRegT::A3), \
+                                          reg.get_x(IntRegT::A4)))
 
 #define neutron_syscall_6(func, reg) \
-    reg.set_x(IntegerRegister<>::A0, func(reg.get_x(IntegerRegister<>::A0), \
-                                          reg.get_x(IntegerRegister<>::A1), \
-                                          reg.get_x(IntegerRegister<>::A2), \
-                                          reg.get_x(IntegerRegister<>::A3), \
-                                          reg.get_x(IntegerRegister<>::A4), \
-                                          reg.get_x(IntegerRegister<>::A5)))
+    reg.set_x(IntRegT::A0, func(reg.get_x(IntRegT::A0), \
+                                          reg.get_x(IntRegT::A1), \
+                                          reg.get_x(IntRegT::A2), \
+                                          reg.get_x(IntRegT::A3), \
+                                          reg.get_x(IntRegT::A4), \
+                                          reg.get_x(IntRegT::A5)))
 
 #define neutron_syscall(num, func, reg) \
     neutron_syscall_##num(func, reg)
@@ -65,21 +65,24 @@ namespace neutron {
         LinuxProgram<> &pcb;
 
     public:
-        LinuxHart(LinuxProgram<> &mem) : Hart{mem.pc, mem.int_reg}, pcb{mem} {}
+        LinuxHart(UXLenT hart_id, LinuxProgram<> &mem) : Hart{hart_id, mem.pc, mem.int_reg}, pcb{mem} {
+            cur_level = USER_MODE;
+        }
+
+        void internal_interrupt_action(UXLenT interrupt, riscv_isa_unused UXLenT trap_value) {
+            csr_reg[CSRRegT::SCAUSE] = interrupt;
+        }
 
         template<typename ValT>
         RetT mmu_load_int_reg(usize dest, UXLenT addr) {
             static_assert(sizeof(ValT) <= sizeof(UXLenT), "load width exceed bit width!");
 
-            if ((addr & (sizeof(ValT) - 1)) != 0) {
-                csr_reg.scause = trap::LOAD_ACCESS_FAULT;
-                return false;
-            }
+            if ((addr & (sizeof(ValT) - 1)) != 0)
+                return internal_interrupt(trap::LOAD_ACCESS_FAULT, addr);
 
             ValT *ptr = pcb.template address_read<ValT>(addr);
             if (ptr == nullptr) {
-                csr_reg.scause = trap::LOAD_PAGE_FAULT;
-                return false;
+                return internal_interrupt(trap::LOAD_PAGE_FAULT, addr);
             } else {
                 if (dest != 0) int_reg.set_x(dest, *ptr);
                 return true;
@@ -90,15 +93,12 @@ namespace neutron {
         RetT mmu_store_int_reg(usize src, UXLenT addr) {
             static_assert(sizeof(ValT) <= sizeof(UXLenT), "store width exceed bit width!");
 
-            if ((addr & (sizeof(ValT) - 1)) != 0) {
-                csr_reg.scause = trap::STORE_AMO_ACCESS_FAULT;
-                return false;
-            }
+            if ((addr & (sizeof(ValT) - 1)) != 0)
+                return internal_interrupt(trap::STORE_AMO_ACCESS_FAULT, addr);
 
             ValT *ptr = pcb.template address_write<ValT>(addr);
             if (ptr == nullptr) {
-                csr_reg.scause = trap::STORE_AMO_PAGE_FAULT;
-                return false;
+                return internal_interrupt(trap::STORE_AMO_PAGE_FAULT, addr);
             } else {
                 *ptr = static_cast<ValT>(int_reg.get_x(src));
                 return true;
@@ -111,13 +111,35 @@ namespace neutron {
 
             u16 *ptr = pcb.template address_execute<u16>(addr + offset * sizeof(u16));
             if (ptr == nullptr) {
-                csr_reg.scause = trap::INSTRUCTION_PAGE_FAULT;
-                return false;
+                return internal_interrupt(trap::INSTRUCTION_PAGE_FAULT, addr);
             } else {
                 *(reinterpret_cast<u16 *>(&this->inst_buffer) + offset) = *ptr;
                 return true;
             }
         }
+
+#if defined(__RV_EXTENSION_ZICSR__)
+
+        RetT get_csr_reg(riscv_isa_unused UXLenT index) { return csr_reg[index]; }
+
+        RetT set_csr_reg(riscv_isa_unused UXLenT index, riscv_isa_unused UXLenT val) { return true; }
+
+#endif // defined(__RV_EXTENSION_ZICSR__)
+#if defined(__RV_SUPERVISOR_MODE__)
+
+        RetT visit_sret_inst(riscv_isa_unused SRETInst *inst) { return illegal_instruction(inst); }
+
+#endif // defined(__RV_SUPERVISOR_MODE__)
+
+        RetT visit_mret_inst(riscv_isa_unused MRETInst *inst) { return illegal_instruction(inst); }
+
+        RetT visit_wfi_inst(riscv_isa_unused WFIInst *inst) { return illegal_instruction(inst); }
+
+#if defined(__RV_SUPERVISOR_MODE__)
+
+        RetT visit_sfencevma_inst(riscv_isa_unused SFENCEVAMInst *inst) { return illegal_instruction(inst); }
+
+#endif // defined(__RV_SUPERVISOR_MODE__)
 
         XLenT sys_close(UXLenT fd) {
             return fd > 2 ? close(fd) : 0; // todo: stdin, stdout, stderr
@@ -148,7 +170,7 @@ namespace neutron {
         }
 
         bool syscall_handler() {
-            switch (int_reg.get_x(IntegerRegister<>::A7)) {
+            switch (int_reg.get_x(IntRegT::A7)) {
                 case syscall::close:
                     neutron_syscall(1, sys_close, int_reg);
                     return true;
@@ -159,7 +181,7 @@ namespace neutron {
                     neutron_syscall(2, sys_fstat, int_reg);
                     return true;
                 case syscall::exit:
-                    std::cout << std::endl << "[exit " << int_reg.get_x(IntegerRegister<>::A0) << ']'
+                    std::cout << std::endl << "[exit " << int_reg.get_x(IntRegT::A0) << ']'
                               << std::endl;
 
                     return false;
@@ -168,7 +190,7 @@ namespace neutron {
                     return true;
                 default:
                     std::cerr << "Invalid environment call number at " << std::hex << get_pc()
-                              << ", call number " << std::dec << int_reg.get_x(IntegerRegister<>::A7)
+                              << ", call number " << std::dec << int_reg.get_x(IntRegT::A7)
                               << std::endl;
 
                     return false;
@@ -217,6 +239,8 @@ namespace neutron {
                     }
                 case trap::S_MODE_ENVIRONMENT_CALL:
                     riscv_isa_unreachable("no system mode interrupt!");
+                case trap::M_MODE_ENVIRONMENT_CALL:
+                    riscv_isa_unreachable("no machine mode interrupt!");
                 case trap::INSTRUCTION_PAGE_FAULT:
                     std::cerr << "Instruction page fault at "
                               << std::hex << get_pc() << ": " << std::dec
@@ -240,7 +264,7 @@ namespace neutron {
             }
         }
 
-        void start() { while (visit() || supervisor_trap_handler(csr_reg.scause)); }
+        void start() { while (visit() || supervisor_trap_handler(csr_reg[CSRRegT::SCAUSE])); }
     };
 }
 

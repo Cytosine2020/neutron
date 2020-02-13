@@ -16,7 +16,7 @@ int main(int argc, char **argv) {
     LinuxProgram<> mem{};
     if (!mem.load_elf(visitor)) riscv_isa_abort("ELF file broken!");
 
-    LinuxHart core{mem};
+    LinuxHart core{0, mem};
     core.start();
 
     if (close(fd) != 0) riscv_isa_abort("Close file failed!");
