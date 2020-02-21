@@ -4,6 +4,12 @@
 using namespace neutron;
 
 
+class Core : public LinuxHart<Core> {
+public:
+    Core(UXLenT hart_id, LinuxProgram<> &mem) : LinuxHart<Core>{hart_id, mem} {}
+};
+
+
 int main(int argc, char **argv) {
     if (argc != 2) riscv_isa_abort("receive one file name!");
 
@@ -16,7 +22,7 @@ int main(int argc, char **argv) {
     LinuxProgram<> mem{};
     if (!mem.load_elf(visitor)) riscv_isa_abort("ELF file broken!");
 
-    LinuxHart core{0, mem};
+    Core core{0, mem};
     core.start();
 
     if (close(fd) != 0) riscv_isa_abort("Close file failed!");

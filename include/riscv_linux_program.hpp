@@ -4,6 +4,12 @@
 
 #include <sys/stat.h>
 
+#include <map>
+
+#include "elf_header.hpp"
+
+using namespace elf;
+
 
 namespace neutron {
     template<typename xlen=xlen_trait>
@@ -201,7 +207,8 @@ namespace neutron {
             UXLenT brk_page = divide_ceil(brk, RISCV_PAGE_SIZE) * RISCV_PAGE_SIZE;
 
             if (addr_page <= brk_page) return brk;
-            void *area = mmap(nullptr, addr_page - brk_page, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+            void *area = mmap(nullptr, addr_page - brk_page, PROT_READ | PROT_WRITE,
+                              MAP_SHARED | MAP_ANONYMOUS, -1, 0);
             if (area == MAP_FAILED) return brk;
             if (!add_map(brk_page, area, addr_page - brk_page, READ_WRITE)) return brk;
 
