@@ -8,8 +8,6 @@
 #include "target/hart.hpp"
 #include "target/dump.hpp"
 
-using namespace riscv_isa;
-
 #include "riscv_linux_program.hpp"
 #include "unix_std.hpp"
 
@@ -55,8 +53,8 @@ using namespace riscv_isa;
 
 
 namespace neutron {
-    template <typename SubT>
-    class LinuxHart : public Hart<SubT> {
+    template<typename SubT>
+    class LinuxHart : public riscv_isa::Hart<SubT> {
     private:
         SubT *sub_type() { return static_cast<SubT *>(this); }
 
@@ -64,14 +62,15 @@ namespace neutron {
         LinuxProgram<> &pcb;
 
     public:
-        using RetT = typename Hart<SubT>::RetT;
-        using XLenT = typename Hart<SubT>::XLenT;
-        using UXLenT = typename Hart<SubT>::UXLenT;
-        using IntRegT = typename Hart<SubT>::IntRegT;
-        using CSRRegT = typename Hart<SubT>::CSRRegT;
+        using RetT = typename riscv_isa::Hart<SubT>::RetT;
+        using XLenT = typename riscv_isa::Hart<SubT>::XLenT;
+        using UXLenT = typename riscv_isa::Hart<SubT>::UXLenT;
+        using IntRegT = typename riscv_isa::Hart<SubT>::IntRegT;
+        using CSRRegT = typename riscv_isa::Hart<SubT>::CSRRegT;
 
-        LinuxHart(UXLenT hart_id, LinuxProgram<> &mem) : Hart<SubT>{hart_id, mem.pc, mem.int_reg}, pcb{mem} {
-            this->cur_level = USER_MODE;
+        LinuxHart(UXLenT hart_id, LinuxProgram<> &mem) :
+                riscv_isa::Hart<SubT>{hart_id, mem.pc, mem.int_reg}, pcb{mem} {
+            this->cur_level = riscv_isa::USER_MODE;
         }
 
         void internal_interrupt_action(UXLenT interrupt, riscv_isa_unused UXLenT trap_value) {
@@ -83,11 +82,11 @@ namespace neutron {
             static_assert(sizeof(ValT) <= sizeof(UXLenT), "load width exceed bit width!");
 
             if ((addr & (sizeof(ValT) - 1)) != 0)
-                return sub_type()->internal_interrupt(trap::LOAD_ACCESS_FAULT, addr);
+                return sub_type()->internal_interrupt(riscv_isa::trap::LOAD_ACCESS_FAULT, addr);
 
             ValT *ptr = pcb.template address_read<ValT>(addr);
             if (ptr == nullptr) {
-                return sub_type()->internal_interrupt(trap::LOAD_PAGE_FAULT, addr);
+                return sub_type()->internal_interrupt(riscv_isa::trap::LOAD_PAGE_FAULT, addr);
             } else {
                 if (dest != 0) this->int_reg.set_x(dest, *ptr);
                 return true;
@@ -99,11 +98,11 @@ namespace neutron {
             static_assert(sizeof(ValT) <= sizeof(UXLenT), "store width exceed bit width!");
 
             if ((addr & (sizeof(ValT) - 1)) != 0)
-                return sub_type()->internal_interrupt(trap::STORE_AMO_ACCESS_FAULT, addr);
+                return sub_type()->internal_interrupt(riscv_isa::trap::STORE_AMO_ACCESS_FAULT, addr);
 
             ValT *ptr = pcb.template address_write<ValT>(addr);
             if (ptr == nullptr) {
-                return sub_type()->internal_interrupt(trap::STORE_AMO_PAGE_FAULT, addr);
+                return sub_type()->internal_interrupt(riscv_isa::trap::STORE_AMO_PAGE_FAULT, addr);
             } else {
                 *ptr = static_cast<ValT>(this->int_reg.get_x(src));
                 return true;
@@ -116,7 +115,7 @@ namespace neutron {
 
             u16 *ptr = pcb.template address_execute<u16>(addr + offset * sizeof(u16));
             if (ptr == nullptr) {
-                return sub_type()->internal_interrupt(trap::INSTRUCTION_PAGE_FAULT, addr);
+                return sub_type()->internal_interrupt(riscv_isa::trap::INSTRUCTION_PAGE_FAULT, addr);
             } else {
                 *(reinterpret_cast<u16 *>(&this->inst_buffer) + offset) = *ptr;
                 return true;
@@ -131,21 +130,31 @@ namespace neutron {
 
 #endif // defined(__RV_EXTENSION_ZICSR__)
 
-        RetT visit_fence_inst(riscv_isa_unused FENCEInst *inst) { return sub_type()->illegal_instruction(inst); }
+        RetT visit_fence_inst(riscv_isa_unused riscv_isa::FENCEInst *inst) {
+            return sub_type()->illegal_instruction(inst);
+        }
 
 #if defined(__RV_SUPERVISOR_MODE__)
 
-        RetT visit_sret_inst(riscv_isa_unused SRETInst *inst) { return sub_type()->illegal_instruction(inst); }
+        RetT visit_sret_inst(riscv_isa_unused riscv_isa::SRETInst *inst) {
+            return sub_type()->illegal_instruction(inst);
+        }
 
 #endif // defined(__RV_SUPERVISOR_MODE__)
 
-        RetT visit_mret_inst(riscv_isa_unused MRETInst *inst) { return sub_type()->illegal_instruction(inst); }
+        RetT visit_mret_inst(riscv_isa_unused riscv_isa::MRETInst *inst) {
+            return sub_type()->illegal_instruction(inst);
+        }
 
-        RetT visit_wfi_inst(riscv_isa_unused WFIInst *inst) { return sub_type()->illegal_instruction(inst); }
+        RetT visit_wfi_inst(riscv_isa_unused riscv_isa::WFIInst *inst) {
+            return sub_type()->illegal_instruction(inst);
+        }
 
 #if defined(__RV_SUPERVISOR_MODE__)
 
-        RetT visit_sfencevma_inst(riscv_isa_unused SFENCEVAMInst *inst) { return sub_type()->illegal_instruction(inst); }
+        RetT visit_sfencevma_inst(riscv_isa_unused riscv_isa::SFENCEVAMInst *inst) {
+            return sub_type()->illegal_instruction(inst);
+        }
 
 #endif // defined(__RV_SUPERVISOR_MODE__)
 
@@ -233,64 +242,64 @@ namespace neutron {
 
         bool supervisor_trap_handler(XLenT cause) {
             switch (cause) {
-                case trap::INSTRUCTION_ADDRESS_MISALIGNED:
-                case trap::INSTRUCTION_ACCESS_FAULT:
+                case riscv_isa::trap::INSTRUCTION_ADDRESS_MISALIGNED:
+                case riscv_isa::trap::INSTRUCTION_ACCESS_FAULT:
                     std::cerr << "Instruction address misaligned at "
                               << std::hex << this->get_pc() << std::endl;
 
                     return false;
-                case trap::ILLEGAL_INSTRUCTION:
+                case riscv_isa::trap::ILLEGAL_INSTRUCTION:
                     std::cerr << "Illegal instruction at "
                               << std::hex << this->get_pc() << ": " << std::dec
-                              << *reinterpret_cast<Instruction *>(&this->inst_buffer) << std::endl;
+                              << *reinterpret_cast<riscv_isa::Instruction *>(&this->inst_buffer) << std::endl;
 
                     return false;
-                case trap::BREAKPOINT:
+                case riscv_isa::trap::BREAKPOINT:
                     std::cerr << "Break point at " << std::hex << this->get_pc() << std::endl;
-                    this->inc_pc(ECALLInst::INST_WIDTH);
+                    this->inc_pc(riscv_isa::ECALLInst::INST_WIDTH);
 
                     return true;
-                case trap::LOAD_ADDRESS_MISALIGNED:
-                case trap::LOAD_ACCESS_FAULT:
+                case riscv_isa::trap::LOAD_ADDRESS_MISALIGNED:
+                case riscv_isa::trap::LOAD_ACCESS_FAULT:
                     std::cerr << "Load address misaligned at "
                               << std::hex << this->get_pc() << ": " << std::dec
-                              << *reinterpret_cast<Instruction *>(&this->inst_buffer) << std::endl;
+                              << *reinterpret_cast<riscv_isa::Instruction *>(&this->inst_buffer) << std::endl;
 
                     return false;
-                case trap::STORE_AMO_ADDRESS_MISALIGNED:
-                case trap::STORE_AMO_ACCESS_FAULT:
+                case riscv_isa::trap::STORE_AMO_ADDRESS_MISALIGNED:
+                case riscv_isa::trap::STORE_AMO_ACCESS_FAULT:
                     std::cerr << "Store or AMO address misaligned at "
                               << std::hex << this->get_pc() << ": " << std::dec
-                              << *reinterpret_cast<Instruction *>(&this->inst_buffer) << std::endl;
+                              << *reinterpret_cast<riscv_isa::Instruction *>(&this->inst_buffer) << std::endl;
 
                     return false;
-                case trap::U_MODE_ENVIRONMENT_CALL:
+                case riscv_isa::trap::U_MODE_ENVIRONMENT_CALL:
                     if (syscall_handler()) {
-                        this->inc_pc(ECALLInst::INST_WIDTH);
+                        this->inc_pc(riscv_isa::ECALLInst::INST_WIDTH);
                         return true;
                     } else {
                         return false;
                     }
-                case trap::S_MODE_ENVIRONMENT_CALL:
+                case riscv_isa::trap::S_MODE_ENVIRONMENT_CALL:
                     riscv_isa_unreachable("no system mode interrupt!");
-                case trap::M_MODE_ENVIRONMENT_CALL:
+                case riscv_isa::trap::M_MODE_ENVIRONMENT_CALL:
                     riscv_isa_unreachable("no machine mode interrupt!");
-                case trap::INSTRUCTION_PAGE_FAULT:
+                case riscv_isa::trap::INSTRUCTION_PAGE_FAULT:
                     std::cerr << "Instruction page fault at "
                               << std::hex << this->get_pc() << ": " << std::dec
-                              << *reinterpret_cast<Instruction *>(&this->inst_buffer) << std::endl;
+                              << *reinterpret_cast<riscv_isa::Instruction *>(&this->inst_buffer) << std::endl;
 
                     return false;
-                case trap::LOAD_PAGE_FAULT:
+                case riscv_isa::trap::LOAD_PAGE_FAULT:
                     std::cerr << "Load page fault at "
                               << std::hex << this->get_pc() << ": " << std::dec
-                              << *reinterpret_cast<Instruction *>(&this->inst_buffer) << std::endl;
+                              << *reinterpret_cast<riscv_isa::Instruction *>(&this->inst_buffer) << std::endl;
 
                     return false;
-                case trap::STORE_AMO_PAGE_FAULT:
+                case riscv_isa::trap::STORE_AMO_PAGE_FAULT:
                     std::cerr << "Store or AMO page fault at "
                               << std::hex << this->get_pc() << ": " << std::dec
-                              << *reinterpret_cast<Instruction *>(&this->inst_buffer) << std::endl;
+                              << *reinterpret_cast<riscv_isa::Instruction *>(&this->inst_buffer) << std::endl;
 
                     return false;
                 default:

@@ -8,8 +8,6 @@
 #include "target/hart.hpp"
 #include "target/dump.hpp"
 
-using namespace riscv_isa;
-
 #include "riscv_linux_program.hpp"
 #include "riscv_linux.hpp"
 #include "unix_std.hpp"
@@ -18,7 +16,7 @@ using namespace riscv_isa;
 namespace neutron {
     struct BranchRecord {
     public:
-        using UXLenT = xlen_trait::UXLenT;
+        using UXLenT = riscv_isa::xlen_trait::UXLenT;
 
         enum {
             BEQ, BNE, BLT, BGE, BLTU, BGEU, JAL, JALR,
@@ -95,13 +93,13 @@ namespace neutron {
         LinuxRecordHart(UXLenT hart_id, LinuxProgram<> &mem) :
                 LinuxHart<LinuxRecordHart>{hart_id, mem}, input_offset{0} {}
 
-        RetT visit_jal_inst(JALInst *inst) {
+        RetT visit_jal_inst(riscv_isa::JALInst *inst) {
             execute_record.branch.emplace_back(BranchRecord::jal(get_pc(), inst->get_rd()));
 
             return super()->visit_jal_inst(inst);
         }
 
-        RetT visit_jalr_inst(JALRInst *inst) {
+        RetT visit_jalr_inst(riscv_isa::JALRInst *inst) {
             usize rs1 = inst->get_rs1();
             XLenT imm = inst->get_imm();
             UXLenT target = get_bits<UXLenT, XLEN, 1, 1>(int_reg.get_x(rs1) + imm);
@@ -111,7 +109,7 @@ namespace neutron {
             return super()->visit_jalr_inst(inst);
         }
 
-        RetT visit_beq_inst(BEQInst *inst) {
+        RetT visit_beq_inst(riscv_isa::BEQInst *inst) {
             UXLenT op1 = int_reg.get_x(inst->get_rs1());
             UXLenT op2 = int_reg.get_x(inst->get_rs2());
 
@@ -120,7 +118,7 @@ namespace neutron {
             return super()->visit_beq_inst(inst);
         }
 
-        RetT visit_bne_inst(BNEInst *inst) {
+        RetT visit_bne_inst(riscv_isa::BNEInst *inst) {
             UXLenT op1 = int_reg.get_x(inst->get_rs1());
             UXLenT op2 = int_reg.get_x(inst->get_rs2());
 
@@ -129,7 +127,7 @@ namespace neutron {
             return super()->visit_bne_inst(inst);
         }
 
-        RetT visit_blt_inst(BLTInst *inst) {
+        RetT visit_blt_inst(riscv_isa::BLTInst *inst) {
             UXLenT op1 = int_reg.get_x(inst->get_rs1());
             UXLenT op2 = int_reg.get_x(inst->get_rs2());
 
@@ -138,7 +136,7 @@ namespace neutron {
             return super()->visit_blt_inst(inst);
         }
 
-        RetT visit_bge_inst(BGEInst *inst) {
+        RetT visit_bge_inst(riscv_isa::BGEInst *inst) {
             UXLenT op1 = int_reg.get_x(inst->get_rs1());
             UXLenT op2 = int_reg.get_x(inst->get_rs2());
 
@@ -147,7 +145,7 @@ namespace neutron {
             return super()->visit_bge_inst(inst);
         }
 
-        RetT visit_bltu_inst(BLTUInst *inst) {
+        RetT visit_bltu_inst(riscv_isa::BLTUInst *inst) {
             UXLenT op1 = int_reg.get_x(inst->get_rs1());
             UXLenT op2 = int_reg.get_x(inst->get_rs2());
 
@@ -156,7 +154,7 @@ namespace neutron {
             return super()->visit_bltu_inst(inst);
         }
 
-        RetT visit_bgeu_inst(BGEUInst *inst) {
+        RetT visit_bgeu_inst(riscv_isa::BGEUInst *inst) {
             UXLenT op1 = int_reg.get_x(inst->get_rs1());
             UXLenT op2 = int_reg.get_x(inst->get_rs2());
 
@@ -178,13 +176,13 @@ namespace neutron {
                         new_input_offset = input_offset + offset;
                         break;
                     case SEEK_END:
-                        riscv_isa_abort("seek end not implemented!");
+                        neutron_abort("seek end not implemented!");
                     case SEEK_HOLE:
-                        riscv_isa_abort("seek hole not implemented!");
+                        neutron_abort("seek hole not implemented!");
                     case SEEK_DATA:
-                        riscv_isa_abort("seek data not implemented!");
+                        neutron_abort("seek data not implemented!");
                     default:
-                        riscv_isa_abort("unknown seek type!");
+                        neutron_abort("unknown seek type!");
                 }
 
                 if (new_input_offset < 0) return -EINVAL;
@@ -262,16 +260,16 @@ namespace neutron {
                 LinuxHart<LinuxCompareHart>{hart_id, mem}, record{record}, iter{record.branch.begin()},
                 input_offset{0}, offset{offset}, new_value{new_value}, sync{true} {}
 
-        RetT visit_jal_inst(JALInst *inst) {
+        RetT visit_jal_inst(riscv_isa::JALInst *inst) {
             usize rd = inst->get_rd();
 
-            if (is_link(rd)) stack.emplace_back(get_pc() + JALInst::INST_WIDTH);
+            if (is_link(rd)) stack.emplace_back(get_pc() + riscv_isa::JALInst::INST_WIDTH);
 
             if (sync) {
-                if (iter == record.branch.end()) riscv_isa_abort("");
-                if (iter->address != static_cast<UXLenT>(get_pc())) riscv_isa_abort("");
+                if (iter == record.branch.end()) neutron_abort("");
+                if (iter->address != static_cast<UXLenT>(get_pc())) neutron_abort("");
 
-                if (is_link(rd)) cmp_stack.emplace_back(get_pc() + JALInst::INST_WIDTH);
+                if (is_link(rd)) cmp_stack.emplace_back(get_pc() + riscv_isa::JALInst::INST_WIDTH);
 
                 ++iter;
             } else {
@@ -281,7 +279,7 @@ namespace neutron {
             return super()->visit_jal_inst(inst);
         }
 
-        RetT visit_jalr_inst(JALRInst *inst) {
+        RetT visit_jalr_inst(riscv_isa::JALRInst *inst) {
             usize rd = inst->get_rd();
             usize rs1 = inst->get_rs1();
             XLenT imm = inst->get_imm();
@@ -289,24 +287,24 @@ namespace neutron {
 
             if (is_link(rd)) {
                 if (is_link(rs1) && rd != rs1) stack.pop_back();
-                stack.emplace_back(get_pc() + JALRInst::INST_WIDTH);
+                stack.emplace_back(get_pc() + riscv_isa::JALRInst::INST_WIDTH);
             } else {
                 if (is_link(rs1)) {
-                    if (target != stack.back()) riscv_isa_abort("");
+                    if (target != stack.back()) neutron_abort("");
                     stack.pop_back();
                 }
             }
 
             if (sync) {
-                if (iter == record.branch.end()) riscv_isa_abort("");
-                if (iter->address != static_cast<UXLenT>(get_pc())) riscv_isa_abort("");
+                if (iter == record.branch.end()) neutron_abort("");
+                if (iter->address != static_cast<UXLenT>(get_pc())) neutron_abort("");
 
                 if (is_link(rd)) {
                     if (is_link(rs1) && rd != rs1) cmp_stack.pop_back();
-                    cmp_stack.emplace_back(get_pc() + JALRInst::INST_WIDTH);
+                    cmp_stack.emplace_back(get_pc() + riscv_isa::JALRInst::INST_WIDTH);
                 } else {
                     if (is_link(rs1)) {
-                        if (target != cmp_stack.back()) riscv_isa_abort("");
+                        if (target != cmp_stack.back()) neutron_abort("");
                         cmp_stack.pop_back();
                     }
                 }
@@ -314,9 +312,20 @@ namespace neutron {
                 if (iter->get_target() != target) {
                     std::cout << std::hex << get_pc() << std::dec << std::endl;
                     sync = false;
-                }
 
-                ++iter;
+                    while (++iter != record.branch.end()) {
+                        switch (iter->type) {
+                            case BranchRecord::JALR:
+//                                if (iter->get_target() == )
+
+                                break;
+                            default:
+                                riscv_isa_unreachable("unknown type!");
+                        }
+                    }
+                } else {
+                    ++iter;
+                }
             } else {
 
             }
@@ -330,16 +339,48 @@ namespace neutron {
             UXLenT op2 = int_reg.get_x(inst->get_rs2());
 
             if (sync) {
-                if (iter == record.branch.end()) riscv_isa_abort("");
-                if (iter->address != static_cast<UXLenT>(get_pc())) riscv_isa_abort("");
+                if (iter == record.branch.end()) neutron_abort("");
+                if (iter->address != static_cast<UXLenT>(get_pc())) neutron_abort("");
 
                 if (iter->get_op1() != op1 || iter->get_op2() != op2)
                     std::cout << std::hex << get_pc() << std::dec << std::endl;
 
-                if (OP::op(iter->get_op1(), iter->get_op2()) != OP::op(op1, op2))
+                if (OP::op(iter->get_op1(), iter->get_op2()) != OP::op(op1, op2)) {
                     sync = false;
 
-                ++iter;
+                    while (++iter != record.branch.end()) {
+                        switch (iter->type) {
+                            case BranchRecord::BEQ:
+
+                                break;
+                            case BranchRecord::BNE:
+
+                                break;
+                            case BranchRecord::BLT:
+
+                                break;
+                            case BranchRecord::BGE:
+
+                                break;
+                            case BranchRecord::BLTU:
+
+                                break;
+                            case BranchRecord::BGEU:
+
+                                break;
+                            case BranchRecord::JAL:
+
+                                break;
+                            case BranchRecord::JALR:
+
+                                break;
+                            default:
+                                riscv_isa_unreachable("unknown type!");
+                        }
+                    }
+                } else {
+                    ++iter;
+                }
             } else {
 
             }
@@ -347,28 +388,28 @@ namespace neutron {
             return operate_branch<OP>(inst);
         }
 
-        RetT visit_beq_inst(BEQInst *inst) {
-            return operate_branch_compare<typename operators::EQ<xlen_trait>>(inst);
+        RetT visit_beq_inst(riscv_isa::BEQInst *inst) {
+            return operate_branch_compare<typename riscv_isa::operators::EQ<riscv_isa::xlen_trait>>(inst);
         }
 
-        RetT visit_bne_inst(BNEInst *inst) {
-            return operate_branch_compare<typename operators::NE<xlen_trait>>(inst);
+        RetT visit_bne_inst(riscv_isa::BNEInst *inst) {
+            return operate_branch_compare<typename riscv_isa::operators::NE<riscv_isa::xlen_trait>>(inst);
         }
 
-        RetT visit_blt_inst(BLTInst *inst) {
-            return operate_branch_compare<typename operators::LT<xlen_trait>>(inst);
+        RetT visit_blt_inst(riscv_isa::BLTInst *inst) {
+            return operate_branch_compare<typename riscv_isa::operators::LT<riscv_isa::xlen_trait>>(inst);
         }
 
-        RetT visit_bge_inst(BGEInst *inst) {
-            return operate_branch_compare<typename operators::GE<xlen_trait>>(inst);
+        RetT visit_bge_inst(riscv_isa::BGEInst *inst) {
+            return operate_branch_compare<typename riscv_isa::operators::GE<riscv_isa::xlen_trait>>(inst);
         }
 
-        RetT visit_bltu_inst(BLTUInst *inst) {
-            return operate_branch_compare<typename operators::LTU<xlen_trait>>(inst);
+        RetT visit_bltu_inst(riscv_isa::BLTUInst *inst) {
+            return operate_branch_compare<typename riscv_isa::operators::LTU<riscv_isa::xlen_trait>>(inst);
         }
 
-        RetT visit_bgeu_inst(BGEUInst *inst) {
-            return operate_branch_compare<typename operators::GEU<xlen_trait>>(inst);
+        RetT visit_bgeu_inst(riscv_isa::BGEUInst *inst) {
+            return operate_branch_compare<typename riscv_isa::operators::GEU<riscv_isa::xlen_trait>>(inst);
         }
 
         XLenT sys_lseek(XLenT fd, XLenT offset, XLenT whence) {
@@ -384,13 +425,13 @@ namespace neutron {
                         new_input_offset = input_offset + offset;
                         break;
                     case SEEK_END:
-                        riscv_isa_abort("seek end not implemented!");
+                        neutron_abort("seek end not implemented!");
                     case SEEK_HOLE:
-                        riscv_isa_abort("seek hole not implemented!");
+                        neutron_abort("seek hole not implemented!");
                     case SEEK_DATA:
-                        riscv_isa_abort("seek data not implemented!");
+                        neutron_abort("seek data not implemented!");
                     default:
-                        riscv_isa_abort("unknown seek type!");
+                        neutron_abort("unknown seek type!");
                 }
 
                 if (new_input_offset < 0) return -EINVAL;

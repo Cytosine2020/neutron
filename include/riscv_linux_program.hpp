@@ -8,11 +8,9 @@
 
 #include "elf_header.hpp"
 
-using namespace elf;
-
 
 namespace neutron {
-    template<typename xlen=xlen_trait>
+    template<typename xlen=riscv_isa::xlen_trait>
     class LinuxProgram {
     private:
         using XLenT = typename xlen::XLenT;
@@ -53,28 +51,28 @@ namespace neutron {
         UXLenT start_brk, end_brk;
 
     public:
-        IntegerRegister<xlen_trait> int_reg;
+        riscv_isa::IntegerRegister <riscv_isa::xlen_trait> int_reg;
         XLenT pc;
 
-        LinuxProgram() : mem_areas{}, brk{0}, int_reg{}, pc{0} {
-            host_page_size = sysconf(_SC_PAGE_SIZE);
-            if (host_page_size <= 0) riscv_isa_abort("cannot get host page size!");
-        }
+        LinuxProgram() : host_page_size{0}, mem_areas{}, brk{0}, int_reg{}, pc{0} {}
 
         LinuxProgram(const LinuxProgram &other) = delete;
 
         LinuxProgram &operator=(const LinuxProgram &other) = delete;
 
-        bool load_elf(MappedFileVisitor &visitor) {
-            auto *elf_header = ELF32Header::read(visitor);
-            if (elf_header == nullptr || elf_header->file_type != ELF32Header::EXECUTABLE) return false;
+        bool load_elf(elf::MappedFileVisitor &visitor) {
+            host_page_size = sysconf(_SC_PAGE_SIZE);
+            if (host_page_size <= 0) return false;
 
-            auto *section_header_string_table_header = ELF32SectionHeader::cast<ELF32StringTableHeader>(
+            auto *elf_header = elf::ELF32Header::read(visitor);
+            if (elf_header == nullptr || elf_header->file_type != elf::ELF32Header::EXECUTABLE) return false;
+
+            auto *section_header_string_table_header = elf::ELF32SectionHeader::cast<elf::ELF32StringTableHeader>(
                     &elf_header->sections(visitor)[elf_header->string_table_index], visitor);
             if (section_header_string_table_header == nullptr) return false;
 
             for (auto &program: elf_header->programs(visitor)) {
-                auto *loadable = ELF32ProgramHeader::cast<ELF32ExecutableHeader>(&program, visitor);
+                auto *loadable = elf::ELF32ProgramHeader::cast<elf::ELF32ExecutableHeader>(&program, visitor);
                 if (loadable == nullptr) continue;
 
                 if (PROGRAM_TOP <= loadable->mem_size ||
@@ -96,7 +94,7 @@ namespace neutron {
                 UXLenT file_page = divide_ceil(file_size, RISCV_PAGE_SIZE);
                 UXLenT mem_page = divide_ceil(mem_size, RISCV_PAGE_SIZE);
 
-                if (mem_page >= xlen_trait::UXLenMax / RISCV_PAGE_SIZE) return false;
+                if (mem_page >= riscv_isa::xlen_trait::UXLenMax / RISCV_PAGE_SIZE) return false;
 
                 UXLenT file_map = file_page * RISCV_PAGE_SIZE;
                 UXLenT mem_map = mem_page * RISCV_PAGE_SIZE;
@@ -113,7 +111,8 @@ namespace neutron {
                     return false;
 
                 if (start_padding > 0) memset(static_cast<u8 *>(mem_ptr), 0, start_padding);
-                if (file_map > file_size) memset(static_cast<u8 *>(mem_ptr) + file_size, 0, file_map - file_size);
+                if (file_map > file_size)
+                    memset(static_cast<u8 *>(mem_ptr) + file_size, 0, file_map - file_size);
 
                 if (!write) mprotect(mem_ptr, mem_map, PROT_READ);
 
@@ -142,8 +141,8 @@ namespace neutron {
             if (stack == MAP_FAILED) return false;
             add_map(STACK_TOP - STACK_SIZE, stack, STACK_SIZE, LinuxProgram<>::READ_WRITE);
 
-            int_reg.set_x(IntegerRegister<>::SP, STACK_TOP - RISCV_PAGE_SIZE);
-            pc = static_cast<xlen_trait::XLenT>(elf_header->entry_point);
+            int_reg.set_x(riscv_isa::IntegerRegister<>::SP, STACK_TOP - RISCV_PAGE_SIZE);
+            pc = static_cast<riscv_isa::xlen_trait::XLenT>(elf_header->entry_point);
             return (pc & (RISCV_IALIGN / 8 - 1)) == 0; // check instruction align
         }
 
