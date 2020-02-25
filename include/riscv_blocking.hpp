@@ -2,9 +2,12 @@
 #define NEUTRON_RISCV_BLOCKING_HPP
 
 
+#include <map>
+
 #include "instruction/instruction_visitor.hpp"
 
 #include "neutron_utility.hpp"
+#include "graph.hpp"
 
 
 namespace neutron {
@@ -30,7 +33,7 @@ namespace neutron {
     public:
         BlockVisitor() : block{}, inst_offset{0}, inst_buffer{0} {}
 
-        std::map<UXLenT, std::pair<UXLenT, UXLenT>> blocking(UXLenT guest, void *host, usize size) {
+        Graph<UXLenT> blocking(UXLenT guest, void *host, usize size) {
             usize offset = 0;
 
             while (offset < size) {
@@ -41,11 +44,17 @@ namespace neutron {
                 offset += inc;
             }
 
-            for (auto &item: block)
-                item.second = std::make_pair(reularize_addr(item.second.first, guest, size),
-                                             reularize_addr(item.second.second, guest, size));
+            Graph<UXLenT> graph{};
 
-            return std::move(block);
+            for (auto &item: block) {
+                UXLenT vertex = item.first;
+
+                graph.add_vertex(vertex, reularize_addr(item.second.first, guest, size));
+                if (item.second.first != item.second.second)
+                    graph.add_vertex(vertex, reularize_addr(item.second.second, guest, size));
+            }
+
+            return graph;
         }
 
         RetT visit(riscv_isa::Instruction *inst, usize length) {

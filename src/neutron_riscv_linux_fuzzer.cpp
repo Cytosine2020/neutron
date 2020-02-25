@@ -1,19 +1,11 @@
 #include <fcntl.h>
-#include <map>
-#include <set>
 
 #include "neutron_utility.hpp"
 #include "riscv_blocking.hpp"
 #include "riscv_linux_fuzzer.hpp"
+#include "dominator_tree.hpp"
 
 using namespace neutron;
-
-
-struct BranchTable {
-    using UXLenT = riscv_isa::xlen_trait::UXLenT;
-
-    std::vector<std::pair<UXLenT, UXLenT>> true_branch, false_branch;
-};
 
 
 using UXLenT = riscv_isa::xlen_trait::UXLenT;
@@ -73,81 +65,21 @@ int main(int argc, char **argv) {
             if (start == nullptr) neutron_abort("ELF file broken!");
 
             auto blocks = BlockVisitor{}.blocking(func.value, start, func.size);
+            auto pos_dominator = DominatorTree<UXLenT, true>{blocks, 0}.semi_nca();
 
-            for (auto &block: blocks) {
-                std::cout << std::hex << block.first << '\t' << block.second.first;
-                if (block.second.first != block.second.second)
-                    std::cout << '\t' << block.second.second;
+            for (auto block = blocks.begin(); block != blocks.end(); ++block) {
+                if (block.get_successor().empty()) continue;
+
+                std::cout << std::hex << block.get_vertex();
+                for (auto successor: block.get_successor())
+                    std::cout << '\t' << successor;
                 std::cout << std::dec << std::endl;
             }
             std::cout << std::endl;
 
-            std::map<UXLenT, std::set<UXLenT>> pos_dominator{};
-            std::set<UXLenT> all{};
-
-            for (auto &block: blocks) all.emplace(block.first);
-            all.emplace(0);
-
-            for (auto &block: blocks) pos_dominator[block.first] = all;
-            pos_dominator[0].emplace(0);
-
-            for (bool flag = true; flag;) {
-                flag = false;
-                for (auto item = blocks.rbegin(); item != blocks.rend(); ++item) {
-                    auto &origin_set = pos_dominator[item->first];
-                    usize origin_size = origin_set.size();
-
-                    std::set<UXLenT> intersection{};
-
-                    if (item->second.first == item->second.second) {
-                        intersection = pos_dominator[item->second.first];
-                    } else {
-                        auto &successor1 = pos_dominator[item->second.first];
-                        auto &successor2 = pos_dominator[item->second.second];
-
-                        std::set_intersection(successor1.begin(), successor1.end(),
-                                              successor2.begin(), successor2.end(),
-                                              std::inserter(intersection, intersection.begin()));
-                    }
-
-                    intersection.emplace(item->first);
-                    origin_set = std::move(intersection);
-
-                    if (origin_size != origin_set.size()) flag = true;
-                }
-            }
-
-            pos_dominator.erase(0);
-
-            for (auto &item: pos_dominator) item.second.erase(item.first);
-
-            std::map<UXLenT, UXLenT> sync_point{};
-
-            for (bool flag = true; flag;) {
-                std::map<UXLenT, UXLenT> new_set{};
-
-                for (auto &item: pos_dominator)
-                    if (item.second.size() == 1)
-                        new_set.emplace(item.first, *item.second.begin());
-
-                flag = !new_set.empty();
-
-                for(auto &item: new_set) {
-                    for (auto &set: pos_dominator)
-                        set.second.erase(item.second);
-                    sync_point.emplace(item.first, item.second);
-                    pos_dominator.erase(item.first);
-                }
-            }
-
             for (auto &item: pos_dominator)
-                sync_point[item.first] = 0;
-
-            for (auto &item: sync_point)
                 std::cout << std::hex << item.first << '\t' << item.second << std::dec << std::endl;
             std::cout << std::endl;
-
-            // todo: bitset opt
         }
     }
 
