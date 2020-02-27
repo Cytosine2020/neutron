@@ -12,6 +12,237 @@ using UXLenT = riscv_isa::xlen_trait::UXLenT;
 using XLenT = riscv_isa::xlen_trait::XLenT;
 
 
+class RecordCompare { // todo: record not syncronized
+public:
+    using BranchRecordPtr = std::vector<BranchRecord>::iterator;
+
+private:
+    class Status {
+    public:
+        std::vector<BranchRecord> &record;
+        BranchRecordPtr ptr;
+        std::vector<UXLenT> stack;
+
+        explicit Status(std::vector<BranchRecord> &record) : record{record}, ptr{record.begin()}, stack{} {}
+
+        void stack_seek(UXLenT target) {
+            if (target != stack.back()) neutron_abort("");
+            stack.pop_back();
+
+//    isize i = stack.size() - 1;
+//    for (; i >= 0; --i)
+//        if (target == stack[i])
+//            break;
+//
+//    if (i >= 0)
+//        stack.resize(i, 0);
+        }
+
+        bool terminate() { return ptr == record.end(); }
+
+        void step() {
+            switch (ptr->type) {
+                case BranchRecord::BEQ:
+                case BranchRecord::BNE:
+                case BranchRecord::BLT:
+                case BranchRecord::BGE:
+                case BranchRecord::BLTU:
+                case BranchRecord::BGEU:
+                    break;
+                case BranchRecord::JAL:
+                    if (is_link(ptr->get_jal_rd()))
+                        stack.emplace_back(ptr->address + riscv_isa::JALInst::INST_WIDTH);
+
+                    break;
+                case BranchRecord::JALR:
+                    if (is_link(ptr->get_jalr_rd())) {
+                        if (is_link(ptr->get_jalr_rs1()) && ptr->get_jalr_rd() != ptr->get_jalr_rs1())
+                            stack_seek(ptr->get_target());
+                        stack.emplace_back(ptr->address + riscv_isa::JALRInst::INST_WIDTH);
+                    } else {
+                        if (is_link(ptr->get_jalr_rs1()))
+                            stack_seek(ptr->get_target());
+                    }
+                    break;
+                default:
+                    neutron_unreachable("unknown type");
+            }
+
+            ++ptr; // todo: detect end
+        }
+
+        void step_out() {
+            while (!terminate()) {
+                switch (ptr->type) {
+                    case BranchRecord::BEQ:
+                    case BranchRecord::BNE:
+                    case BranchRecord::BLT:
+                    case BranchRecord::BGE:
+                    case BranchRecord::BLTU:
+                    case BranchRecord::BGEU:
+                        break;
+                    case BranchRecord::JAL:
+                        if (is_link(ptr->get_jal_rd()))
+                            stack.emplace_back(ptr->address + riscv_isa::JALInst::INST_WIDTH);
+
+                        break;
+                    case BranchRecord::JALR:
+                        if (is_link(ptr->get_jalr_rd())) {
+                            if (is_link(ptr->get_jalr_rs1()) && ptr->get_jalr_rd() != ptr->get_jalr_rs1()) {
+                                stack_seek(ptr->get_target());
+                                ++ptr;
+                                return;
+                            }
+                            stack.emplace_back(ptr->address + riscv_isa::JALRInst::INST_WIDTH);
+                        } else {
+                            if (is_link(ptr->get_jalr_rs1())) {
+                                stack_seek(ptr->get_target());
+                                ++ptr;
+                                return;
+                            }
+                        }
+                        break;
+                    default:
+                        neutron_unreachable("unknown type");
+                }
+
+                ++ptr;
+            }
+        }
+
+        void break_at(UXLenT addr) {
+            while (!terminate()) {
+                switch (ptr->type) {
+                    case BranchRecord::BEQ:
+                    case BranchRecord::BNE:
+                    case BranchRecord::BLT:
+                    case BranchRecord::BGE:
+                    case BranchRecord::BLTU:
+                    case BranchRecord::BGEU:
+                        break;
+                    case BranchRecord::JAL:
+                        if (is_link(ptr->get_jal_rd()))
+                            stack.emplace_back(ptr->address + riscv_isa::JALInst::INST_WIDTH);
+                        break;
+                    case BranchRecord::JALR:
+                        if (is_link(ptr->get_jalr_rd())) {
+                            bool flag = is_link(ptr->get_jalr_rs1()) && ptr->get_jalr_rd() != ptr->get_jalr_rs1();
+
+                            if (flag) stack_seek(ptr->get_target());
+
+                            stack.emplace_back(ptr->address + riscv_isa::JALRInst::INST_WIDTH);
+
+                            if (flag && addr == 0) {
+                                ++ptr;
+                                return;
+                            }
+                        } else {
+                            if (is_link(ptr->get_jalr_rs1())) {
+                                stack_seek(ptr->get_target());
+                                if (addr == 0) {
+                                    ++ptr;
+                                    return;
+                                }
+                            }
+                        }
+                        break;
+                    default:
+                        neutron_unreachable("unknown type");
+                }
+
+                if (ptr->address == addr) {
+                    ++ptr;
+                    return;
+                }
+
+                ++ptr;
+            }
+        }
+    };
+
+    Status origin, modified;
+    std::map<UXLenT, UXLenT> &sync_point;
+    UXLenT sync_address;
+    enum {
+        STACK, ADDRESS, SYNC
+    } sync;
+
+public:
+    RecordCompare(std::vector<BranchRecord> &origin, std::vector<BranchRecord> &modified,
+                  std::map<UXLenT, UXLenT> &sync_point) :
+            origin{origin}, modified{modified}, sync_point{sync_point}, sync_address{0}, sync{SYNC} {}
+
+    static bool is_link(usize reg) { return reg == 1 || reg == 5; }
+
+    template<typename OP>
+    void compare_record_branch() {
+        if (origin.ptr->get_op1() != modified.ptr->get_op1() || origin.ptr->get_op2() != modified.ptr->get_op2())
+            std::cout << std::hex << origin.ptr->address << std::dec << std::endl;
+
+        if (OP::op(origin.ptr->get_op1(), origin.ptr->get_op2()) !=
+            OP::op(modified.ptr->get_op1(), modified.ptr->get_op2())) {
+            sync_address = sync_point.find(origin.ptr->address)->second;
+            sync = ADDRESS;
+        }
+    }
+
+    void compare() {
+        while (!origin.terminate() && !modified.terminate()) {
+            switch (sync) {
+                case SYNC:
+                    if (origin.ptr->address != modified.ptr->address) neutron_abort("unexpected");
+                    if (origin.ptr->type != modified.ptr->type) neutron_abort("unexpected");
+
+                    switch (origin.ptr->type) {
+                        case BranchRecord::BEQ:
+                            compare_record_branch<riscv_isa::operators::EQ<riscv_isa::xlen_trait>>();
+                            break;
+                        case BranchRecord::BNE:
+                            compare_record_branch<riscv_isa::operators::NE<riscv_isa::xlen_trait>>();
+                            break;
+                        case BranchRecord::BLT:
+                            compare_record_branch<riscv_isa::operators::LT<riscv_isa::xlen_trait>>();
+                            break;
+                        case BranchRecord::BGE:
+                            compare_record_branch<riscv_isa::operators::GE<riscv_isa::xlen_trait>>();
+                            break;
+                        case BranchRecord::BLTU:
+                            compare_record_branch<riscv_isa::operators::LTU<riscv_isa::xlen_trait>>();
+                            break;
+                        case BranchRecord::BGEU:
+                            compare_record_branch<riscv_isa::operators::GEU<riscv_isa::xlen_trait>>();
+                            break;
+                        case BranchRecord::JAL:
+                            break;
+                        case BranchRecord::JALR:
+                            if (origin.ptr->get_target() != modified.ptr->get_target())
+                                sync = STACK;
+                            break;
+                        default:
+                            neutron_unreachable("unknown type");
+                    }
+
+                    origin.step();
+                    modified.step();
+                    break;
+                case STACK:
+                    origin.step_out();
+                    modified.step_out();
+                    sync = SYNC;
+                    break;
+                case ADDRESS:
+                    origin.break_at(sync_address);
+                    modified.break_at(sync_address);
+                    sync = SYNC;
+                    break;
+                default:
+                    neutron_unreachable("unknown type");
+            }
+        }
+    }
+};
+
+
 int main(int argc, char **argv) {
     if (argc != 2) neutron_abort("receive one file name!");
 
@@ -24,10 +255,6 @@ int main(int argc, char **argv) {
     auto *elf_header = elf::ELF32Header::read(visitor);
     if (elf_header == nullptr) neutron_abort("ELF header broken!");
     if (elf_header->file_type != elf::ELF32Header::EXECUTABLE) neutron_abort("ELF file not executable!");
-
-    elf::ELF32StringTableHeader *string_table_header = elf_header->get_string_table_header(visitor);
-    if (string_table_header == nullptr) neutron_abort("ELF file broken!");
-    auto string_table = string_table_header->get_string_table(visitor);
 
     std::map<u32, elf::ELF32SymbolTableHeader::SymbolTableEntry &> objects, functions;
 
@@ -49,51 +276,35 @@ int main(int argc, char **argv) {
         }
     }
 
-    for (auto &section: elf_header->sections(visitor)) {
-        if (section.section_type != elf::ELF32SectionHeader::PROGRAM_BITS) continue;
+    std::map<UXLenT, UXLenT> sync_point{};
 
-        for (auto &function: functions) {
-            auto &func = function.second;
-            if (&section != &elf_header->sections(visitor)[func.section_header_index]) continue;
+    for (auto &function: functions) {
+        auto &func = function.second;
+        auto section = elf_header->sections(visitor)[func.section_header_index];
 
-            const char *name = string_table.get_str(func.name, "[no name]");
-            if (name == nullptr) neutron_abort("ELF file broken!");
+        void *start = visitor.address((func.value - section.address) + section.offset, func.size);
+        if (start == nullptr) neutron_abort("ELF file broken!");
 
-            std::cout << std::hex << func.value << std::dec << " <" << name << ">:" << std::endl;
+        auto blocks = BlockVisitor{}.blocking(func.value, start, func.size);
+        auto pos_dominator = DominatorTree<UXLenT, true>{blocks, 0}.semi_nca();
 
-            void *start = visitor.address((func.value - section.address) + section.offset, func.size);
-            if (start == nullptr) neutron_abort("ELF file broken!");
-
-            auto blocks = BlockVisitor{}.blocking(func.value, start, func.size);
-            auto pos_dominator = DominatorTree<UXLenT, true>{blocks, 0}.semi_nca();
-
-            for (auto block = blocks.begin(); block != blocks.end(); ++block) {
-                if (block.get_successor().empty()) continue;
-
-                std::cout << std::hex << block.get_vertex();
-                for (auto successor: block.get_successor())
-                    std::cout << '\t' << successor;
-                std::cout << std::dec << std::endl;
-            }
-            std::cout << std::endl;
-
-            for (auto &item: pos_dominator)
-                std::cout << std::hex << item.first << '\t' << item.second << std::dec << std::endl;
-            std::cout << std::endl;
-        }
+        sync_point.insert(pos_dominator.begin(), pos_dominator.end());
     }
 
-    LinuxProgram<> mem{};
-    if (!mem.load_elf(visitor)) neutron_abort("ELF file broken!");
+    std::vector<u8> origin_input{};
 
-    LinuxRecordHart record_hart{0, mem};
-    ExecuteRecord record = record_hart.start();
+    LinuxProgram<> mem1{};
+    if (!mem1.load_elf(visitor)) neutron_abort("ELF file broken!");
+    auto origin_record = LinuxFuzzerHart{0, mem1, origin_input}.start();
 
-    LinuxProgram<> mem_2{};
-    if (!mem_2.load_elf(visitor)) neutron_abort("ELF file broken!");
+    std::vector<u8> modified_input = origin_input;
+    modified_input[0] = static_cast<u8>(rand());
 
-    LinuxCompareHart compare_hart{0, mem_2, record, 0, static_cast<u8>(rand())};
-    compare_hart.start();
+    LinuxProgram<> mem2{};
+    if (!mem2.load_elf(visitor)) neutron_abort("ELF file broken!");
+    auto modified_record = LinuxFuzzerHart{0, mem2, modified_input}.start();
+
+    RecordCompare{origin_record, modified_record, sync_point}.compare();
 
     if (close(fd) != 0) neutron_abort("Close file failed!");
 }
