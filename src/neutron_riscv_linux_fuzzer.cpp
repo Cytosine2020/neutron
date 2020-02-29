@@ -40,7 +40,9 @@ private:
 
         bool terminate() { return ptr == record.end(); }
 
-        void step() {
+        bool step(UXLenT stack_top = 0) {
+            bool ret = true;
+
             switch (ptr->type) {
                 case BranchRecord::BEQ:
                 case BranchRecord::BNE:
@@ -56,54 +58,18 @@ private:
                     break;
                 case BranchRecord::JALR:
                     if (is_link(ptr->get_jalr_rd())) {
-                        if (is_link(ptr->get_jalr_rs1()) && ptr->get_jalr_rd() != ptr->get_jalr_rs1())
+                        if (is_link(ptr->get_jalr_rs1()) && ptr->get_jalr_rd() != ptr->get_jalr_rs1()) {
                             stack_seek(ptr->get_target());
-                        stack.emplace_back(ptr->address + riscv_isa::JALRInst::INST_WIDTH);
-                    } else {
-                        if (is_link(ptr->get_jalr_rs1()))
-                            stack_seek(ptr->get_target());
-                    }
-                    break;
-                default:
-                    neutron_unreachable("unknown type");
-            }
-
-            ++ptr;
-        }
-
-        bool step_within_function(UXLenT stack_top) {
-            switch (ptr->type) {
-                case BranchRecord::BEQ:
-                case BranchRecord::BNE:
-                case BranchRecord::BLT:
-                case BranchRecord::BGE:
-                case BranchRecord::BLTU:
-                case BranchRecord::BGEU:
-                    break;
-                case BranchRecord::JAL:
-                    if (is_link(ptr->get_jal_rd()))
-                        stack.emplace_back(ptr->address + riscv_isa::JALInst::INST_WIDTH);
-
-                    break;
-                case BranchRecord::JALR:
-                    if (is_link(ptr->get_jalr_rd())) {
-                        bool flag = is_link(ptr->get_jalr_rs1()) && ptr->get_jalr_rd() != ptr->get_jalr_rs1();
-
-                        if (flag) stack_seek(ptr->get_target());
-
-                        stack.emplace_back(ptr->address + riscv_isa::JALRInst::INST_WIDTH);
-
-                        if (flag && ptr->get_target() == stack_top) {
-                            ++ptr;
-                            return false;
+                            if (ptr->get_target() == stack_top)
+                                ret = false;
                         }
+
+                        stack.emplace_back(ptr->address + riscv_isa::JALRInst::INST_WIDTH);
                     } else {
                         if (is_link(ptr->get_jalr_rs1())) {
                             stack_seek(ptr->get_target());
-                            if (ptr->get_target() == stack_top) {
-                                ++ptr;
-                                return false;
-                            }
+                            if (ptr->get_target() == stack_top)
+                                ret = false;
                         }
                     }
                     break;
@@ -112,55 +78,47 @@ private:
             }
 
             ++ptr;
-            return true;
+            return ret;
         }
 
-        void step_out() {
-            UXLenT stack_top = stack.back();
-
-            while (!terminate()) {
-                if (!step_within_function(stack_top)) break;
-            }
-        }
-
-        void break_at(UXLenT addr) {
+        void break_within_function(UXLenT addr) {
             UXLenT stack_top = stack.back();
 
             while (!terminate()) {
                 if (ptr->address == addr) return;
 
-                if (!step_within_function(stack_top)) break;
+                if (!step(stack_top)) break;
             }
         }
     };
 
     Status origin, modified;
     std::map<UXLenT, UXLenT> &sync_point;
-    UXLenT sync_address;
-    enum {
-        STACK, ADDRESS, SYNC
-    } sync;
+    std::vector<UXLenT> affected_address;
+    UXLenT sync_address; // zero stands for step out of function
+    bool sync;
 
     static bool is_link(usize reg) { return reg == 1 || reg == 5; }
 
     template<typename OP>
     void compare_record_branch() {
         if (origin.ptr->get_op1() != modified.ptr->get_op1() || origin.ptr->get_op2() != modified.ptr->get_op2())
-            std::cout << std::hex << origin.ptr->address << std::dec << std::endl;
+            affected_address.emplace_back(origin.ptr->address);
 
         if (OP::op(origin.ptr->get_op1(), origin.ptr->get_op2()) !=
             OP::op(modified.ptr->get_op1(), modified.ptr->get_op2())) {
             sync_address = sync_point.find(origin.ptr->address)->second;
-            sync = ADDRESS;
+            sync = false;
         }
     }
 
 public:
     RecordCompare(std::vector<BranchRecord> &origin, std::vector<BranchRecord> &modified,
                   std::map<UXLenT, UXLenT> &sync_point) :
-            origin{origin}, modified{modified}, sync_point{sync_point}, sync_address{0}, sync{SYNC} {}
+            origin{origin}, modified{modified}, sync_point{sync_point}, affected_address{}, sync_address{0},
+            sync{true} {}
 
-    void compare() {
+    std::vector<UXLenT> compare() {
         while (true) {
             if (modified.terminate()) {
                 while (!origin.terminate()) {
@@ -170,59 +128,52 @@ public:
 
             if (origin.terminate()) break;
 
-            switch (sync) {
-                case SYNC:
-                    if (origin.ptr->address != modified.ptr->address) neutron_abort("unexpected");
-                    if (origin.ptr->type != modified.ptr->type) neutron_abort("unexpected");
+            if (sync) {
+                if (origin.ptr->address != modified.ptr->address) neutron_abort("unexpected");
+                if (origin.ptr->type != modified.ptr->type) neutron_abort("unexpected");
 
-                    switch (origin.ptr->type) {
-                        case BranchRecord::BEQ:
-                            compare_record_branch<riscv_isa::operators::EQ<riscv_isa::xlen_trait>>();
-                            break;
-                        case BranchRecord::BNE:
-                            compare_record_branch<riscv_isa::operators::NE<riscv_isa::xlen_trait>>();
-                            break;
-                        case BranchRecord::BLT:
-                            compare_record_branch<riscv_isa::operators::LT<riscv_isa::xlen_trait>>();
-                            break;
-                        case BranchRecord::BGE:
-                            compare_record_branch<riscv_isa::operators::GE<riscv_isa::xlen_trait>>();
-                            break;
-                        case BranchRecord::BLTU:
-                            compare_record_branch<riscv_isa::operators::LTU<riscv_isa::xlen_trait>>();
-                            break;
-                        case BranchRecord::BGEU:
-                            compare_record_branch<riscv_isa::operators::GEU<riscv_isa::xlen_trait>>();
-                            break;
-                        case BranchRecord::JAL:
-                            break;
-                        case BranchRecord::JALR:
-                            if (origin.ptr->get_target() != modified.ptr->get_target()) {
-                                std::cout << std::hex << origin.ptr->address << std::dec << std::endl;
-                                sync = STACK;
-                            }
-                            break;
-                        default:
-                            neutron_unreachable("unknown type");
-                    }
+                switch (origin.ptr->type) {
+                    case BranchRecord::BEQ:
+                        compare_record_branch<riscv_isa::operators::EQ<>>();
+                        break;
+                    case BranchRecord::BNE:
+                        compare_record_branch<riscv_isa::operators::NE<>>();
+                        break;
+                    case BranchRecord::BLT:
+                        compare_record_branch<riscv_isa::operators::LT<>>();
+                        break;
+                    case BranchRecord::BGE:
+                        compare_record_branch<riscv_isa::operators::GE<>>();
+                        break;
+                    case BranchRecord::BLTU:
+                        compare_record_branch<riscv_isa::operators::LTU<>>();
+                        break;
+                    case BranchRecord::BGEU:
+                        compare_record_branch<riscv_isa::operators::GEU<>>();
+                        break;
+                    case BranchRecord::JAL:
+                        break;
+                    case BranchRecord::JALR:
+                        if (origin.ptr->get_target() != modified.ptr->get_target()) {
+                            affected_address.emplace_back(origin.ptr->address);
+                            sync_address = 0;
+                            sync = false;
+                        }
+                        break;
+                    default:
+                        neutron_unreachable("unknown type");
+                }
 
-                    origin.step();
-                    modified.step();
-                    break;
-                case STACK:
-                    origin.step_out();
-                    modified.step_out();
-                    sync = SYNC;
-                    break;
-                case ADDRESS:
-                    origin.break_at(sync_address);
-                    modified.break_at(sync_address);
-                    sync = SYNC;
-                    break;
-                default:
-                    neutron_unreachable("unknown type");
+                origin.step();
+                modified.step();
+            } else {
+                origin.break_within_function(sync_address);
+                modified.break_within_function(sync_address);
+                sync = true;
             }
         }
+
+        return std::move(affected_address);
     }
 };
 
@@ -288,7 +239,13 @@ int main(int argc, char **argv) {
     if (!mem2.load_elf(visitor)) neutron_abort("ELF file broken!");
     auto modified_record = LinuxFuzzerHart{0, mem2, modified_input}.start();
 
-    RecordCompare{origin_record, modified_record, sync_point}.compare();
+    auto affected_address = RecordCompare{origin_record, modified_record, sync_point}.compare();
+
+    std::cout << std::hex;
+    for (auto &item: affected_address) {
+        std::cout << item << std::endl;
+    }
+    std::cout << std::dec;
 
     if (close(fd) != 0) neutron_abort("Close file failed!");
 }
