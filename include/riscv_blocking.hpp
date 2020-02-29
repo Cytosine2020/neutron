@@ -92,17 +92,26 @@ namespace neutron {
 
         template<>
         RetT return_inst_len(riscv_isa::JALInst *inst) {
-            if (!is_link(inst->get_rd())) {
+            if (is_link(inst->get_rd())) {
+                UXLenT next_inst = inst_offset + riscv_isa::JALInst::INST_WIDTH;
+                block.emplace(inst_offset, std::make_pair(next_inst, next_inst));
+            } else {
                 usize target = inst_offset + inst->get_imm();
                 block.emplace(inst_offset, std::make_pair(target, target));
             }
+
             return riscv_isa::JALInst::INST_WIDTH;
         }
 
         template<>
         RetT return_inst_len(neutron_unused riscv_isa::JALRInst *inst) {
-            if (!is_link(inst->get_rd()))
+            if (is_link(inst->get_rd())) {
+                UXLenT next_inst = inst_offset + riscv_isa::JALRInst::INST_WIDTH;
+                block.emplace(inst_offset, std::make_pair(next_inst, next_inst));
+            } else {
                 block.emplace(inst_offset, std::make_pair(0, 0));
+            }
+
             return riscv_isa::JALRInst::INST_WIDTH;
         }
 
