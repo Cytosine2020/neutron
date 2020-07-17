@@ -30,7 +30,6 @@ namespace neutron {
             }
         }
 
-    public:
         BlockVisitor() : block{}, inst_offset{0}, inst_buffer{0} {}
 
         Graph<UXLenT> blocking(UXLenT guest, void *host, usize size) {
@@ -79,10 +78,8 @@ namespace neutron {
             }
         }
 
+    public:
         RetT illegal_instruction(neutron_unused riscv_isa::Instruction *inst) { return 0; }
-
-        template<typename InstT>
-        RetT return_inst_len(neutron_unused InstT *inst) { return InstT::INST_WIDTH; }
 
         template<typename InstT>
         RetT log_branch(InstT *inst) {
@@ -90,48 +87,13 @@ namespace neutron {
             return InstT::INST_WIDTH;
         }
 
-        template<>
-        RetT return_inst_len(riscv_isa::JALInst *inst) {
-            if (is_link(inst->get_rd())) {
-                UXLenT next_inst = inst_offset + riscv_isa::JALInst::INST_WIDTH;
-                block.emplace(inst_offset, std::make_pair(next_inst, next_inst));
-            } else {
-                usize target = inst_offset + inst->get_imm();
-                block.emplace(inst_offset, std::make_pair(target, target));
-            }
+        template<typename InstT>
+        struct _return_inst_len {
+            static RetT inner(neutron_unused BlockVisitor *self, neutron_unused InstT *inst);
+        };
 
-            return riscv_isa::JALInst::INST_WIDTH;
-        }
-
-        template<>
-        RetT return_inst_len(riscv_isa::JALRInst *inst) {
-            if (is_link(inst->get_rd())) {
-                UXLenT next_inst = inst_offset + riscv_isa::JALRInst::INST_WIDTH;
-                block.emplace(inst_offset, std::make_pair(next_inst, next_inst));
-            } else {
-                block.emplace(inst_offset, std::make_pair(0, 0)); // zero stands for return to caller
-            }
-
-            return riscv_isa::JALRInst::INST_WIDTH;
-        }
-
-        template<>
-        RetT return_inst_len(riscv_isa::BEQInst *inst) { return log_branch(inst); }
-
-        template<>
-        RetT return_inst_len(riscv_isa::BNEInst *inst) { return log_branch(inst); }
-
-        template<>
-        RetT return_inst_len(riscv_isa::BLTInst *inst) { return log_branch(inst); }
-
-        template<>
-        RetT return_inst_len(riscv_isa::BGEInst *inst) { return log_branch(inst); }
-
-        template<>
-        RetT return_inst_len(riscv_isa::BLTUInst *inst) { return log_branch(inst); }
-
-        template<>
-        RetT return_inst_len(riscv_isa::BGEUInst *inst) { return log_branch(inst); }
+        template<typename InstT>
+        RetT return_inst_len(neutron_unused InstT *inst) { return _return_inst_len<InstT>::inner(this, inst); }
 
 #define _neutron_return_inst_len(NAME, name) \
         RetT visit_##name##_inst(riscv_isa::NAME##Inst *inst) { return return_inst_len(inst); }
@@ -139,7 +101,89 @@ namespace neutron {
         riscv_isa_instruction_map(_neutron_return_inst_len)
 
 #undef _neutron_return_inst_len
+
+        static Graph<UXLenT> build(UXLenT guest, void *host, usize size) {
+            return BlockVisitor{}.blocking(guest, host, size);
+        }
     };
+
+    template<typename InstT>
+    BlockVisitor::RetT BlockVisitor::_return_inst_len<InstT>::inner(
+            neutron_unused BlockVisitor *self, neutron_unused InstT *inst
+    ) {
+        return InstT::INST_WIDTH;
+    }
+
+    template<>
+    BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::JALInst>::inner(
+            BlockVisitor *self, riscv_isa::JALInst *inst
+    ) {
+        if (is_link(inst->get_rd())) {
+            UXLenT next_inst = self->inst_offset + riscv_isa::JALInst::INST_WIDTH;
+            self->block.emplace(self->inst_offset, std::make_pair(next_inst, next_inst));
+        } else {
+            usize target = self->inst_offset + inst->get_imm();
+            self->block.emplace(self->inst_offset, std::make_pair(target, target));
+        }
+
+        return riscv_isa::JALInst::INST_WIDTH;
+    }
+
+    template<>
+    BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::JALRInst>::inner(
+            BlockVisitor *self, riscv_isa::JALRInst *inst
+    ) {
+        if (is_link(inst->get_rd())) {
+            UXLenT next_inst = self->inst_offset + riscv_isa::JALRInst::INST_WIDTH;
+            self->block.emplace(self->inst_offset, std::make_pair(next_inst, next_inst));
+        } else {
+            self->block.emplace(self->inst_offset, std::make_pair(0, 0)); // zero stands for return to caller
+        }
+
+        return riscv_isa::JALRInst::INST_WIDTH;
+    }
+
+    template<>
+    BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::BEQInst>::inner(
+            BlockVisitor *self, riscv_isa::BEQInst *inst
+    ) {
+        return self->log_branch(inst);
+    }
+
+    template<>
+    BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::BNEInst>::inner(
+            BlockVisitor *self, riscv_isa::BNEInst *inst
+    ) {
+        return self->log_branch(inst);
+    }
+
+    template<>
+    BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::BLTInst>::inner(
+            BlockVisitor *self, riscv_isa::BLTInst *inst
+    ) {
+        return self->log_branch(inst);
+    }
+
+    template<>
+    BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::BGEInst>::inner(
+            BlockVisitor *self, riscv_isa::BGEInst *inst
+    ) {
+        return self->log_branch(inst);
+    }
+
+    template<>
+    BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::BLTUInst>::inner(
+            BlockVisitor *self, riscv_isa::BLTUInst *inst
+    ) {
+        return self->log_branch(inst);
+    }
+
+    template<>
+    BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::BGEUInst>::inner(
+            BlockVisitor *self, riscv_isa::BGEUInst *inst
+    ) {
+        return self->log_branch(inst);
+    }
 }
 
 

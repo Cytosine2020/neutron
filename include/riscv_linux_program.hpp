@@ -3,6 +3,7 @@
 
 
 #include <sys/stat.h>
+#include <zconf.h>
 
 #include <map>
 
@@ -149,24 +150,18 @@ namespace neutron {
         template<typename T>
         T *address_read(UXLenT addr) {
             auto before = mem_areas.upper_bound(addr);
-            if (before == mem_areas.begin() || --before == mem_areas.end())
-                return nullptr;
-            if (addr >= before->first + before->second.size)
-                return nullptr;
-            if ((before->second.protection & R_BIT) == 0)
-                return nullptr;
+            if (before == mem_areas.begin() || --before == mem_areas.end()) return nullptr;
+            if (addr >= before->first + before->second.size) return nullptr;
+            if ((before->second.protection & R_BIT) == 0) return nullptr;
             return reinterpret_cast<T *>(static_cast<u8 *>(before->second.physical) + (addr - before->first));
         }
 
         template<typename T>
         T *address_write(UXLenT addr) {
             auto before = mem_areas.upper_bound(addr);
-            if (before == mem_areas.begin() || --before == mem_areas.end())
-                return nullptr;
-            if (addr >= before->first + before->second.size)
-                return nullptr;
-            if ((before->second.protection & W_BIT) == 0)
-                return nullptr;
+            if (before == mem_areas.begin() || --before == mem_areas.end()) return nullptr;
+            if (addr >= before->first + before->second.size) return nullptr;
+            if ((before->second.protection & W_BIT) == 0) return nullptr;
             return reinterpret_cast<T *>(static_cast<u8 *>(before->second.physical) + (addr - before->first));
         }
 

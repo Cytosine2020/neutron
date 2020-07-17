@@ -9,6 +9,34 @@
 #include "graph.hpp"
 
 namespace neutron {
+    template<typename VertexT, bool post>
+    class DominatorTree;
+
+    template<typename VertexT, bool post, bool direction>
+    struct _get_relate_vertex {
+        using VertexSet = typename DominatorTree<VertexT, post>::VertexSet;
+        using VertexPtr = typename DominatorTree<VertexT, post>::VertexPtr;
+
+        static VertexSet inner(VertexPtr vertex);
+    };
+
+    template<typename VertexT, bool post>
+    struct _get_relate_vertex<VertexT, post, true> {
+        using VertexSet = typename DominatorTree<VertexT, post>::VertexSet;
+        using VertexPtr = typename DominatorTree<VertexT, post>::VertexPtr;
+
+        static VertexSet inner(VertexPtr vertex) { return vertex.get_successor(); }
+    };
+
+    template<typename VertexT, bool post>
+    struct _get_relate_vertex<VertexT, post, false> {
+        using VertexSet = typename DominatorTree<VertexT, post>::VertexSet;
+        using VertexPtr = typename DominatorTree<VertexT, post>::VertexPtr;
+
+        static VertexSet inner(VertexPtr vertex) { return vertex.get_predecessor(); }
+    };
+
+
     template<typename VertexT, bool post = false>
     class DominatorTree {
     public:
@@ -32,15 +60,10 @@ namespace neutron {
         std::vector<VertexT> vertex;
         std::unordered_map<VertexT, VertexInfo> vertex_info;
 
-    public:
         template<bool direction>
-        static VertexSet get_relate_vertex(VertexPtr vertex);
-
-        template<>
-        static VertexSet get_relate_vertex<true>(VertexPtr vertex) { return vertex.get_successor(); }
-
-        template<>
-        static VertexSet get_relate_vertex<false>(VertexPtr vertex) { return vertex.get_predecessor(); }
+        static VertexSet get_relate_vertex(VertexPtr vertex) {
+            return _get_relate_vertex<VertexT, post, direction>::inner(vertex);
+        }
 
         explicit DominatorTree(GraghT &graph, VertexT entry) : entry{entry}, graph{graph}, vertex{}, vertex_info{} {};
 
@@ -103,13 +126,13 @@ namespace neutron {
             VertexT current = v;
             VertexT ancestor = vertex[vertex_info[current].ancestor];
 
-            while(vertex_info[ancestor].ancestor != 0) {
+            while (vertex_info[ancestor].ancestor != 0) {
                 stack.emplace_back(current);
                 current = ancestor;
                 ancestor = vertex[vertex_info[current].ancestor];
             }
 
-            while(!stack.empty()) {
+            while (!stack.empty()) {
                 ancestor = current;
                 current = stack.back();
                 stack.pop_back();
@@ -165,7 +188,16 @@ namespace neutron {
 
             return dominator;
         }
+
+    public:
+
+        static std::map<VertexT, VertexT> build(GraghT &graph, VertexT entry) {
+            return DominatorTree{graph, entry}.semi_nca();
+        }
     };
+
+    template<typename VertexT>
+    using PosDominatorTree = DominatorTree<VertexT, false>;
 }
 
 

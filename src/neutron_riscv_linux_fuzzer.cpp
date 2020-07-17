@@ -13,17 +13,13 @@ using XLenT = riscv_isa::xlen_trait::XLenT;
 
 
 class RecordCompare { // todo: record not synchronized
-public:
-    using BranchRecordPtr = std::vector<BranchRecord>::iterator;
-
 private:
     class Status {
     public:
-        std::vector<BranchRecord> &record;
-        BranchRecordPtr ptr;
+        std::vector<BranchRecord>::iterator ptr, end;
         std::vector<UXLenT> stack;
 
-        explicit Status(std::vector<BranchRecord> &record) : record{record}, ptr{record.begin()}, stack{} {}
+        explicit Status(std::vector<BranchRecord> &record) : ptr{record.begin()}, end{record.end()}, stack{} {}
 
         void stack_seek(UXLenT target) {
             if (target != stack.back()) neutron_abort("");
@@ -38,7 +34,7 @@ private:
 //        stack.resize(i, 0);
         }
 
-        bool terminate() { return ptr == record.end(); }
+        bool terminate() { return ptr == end; }
 
         bool step(UXLenT stack_top = 0) {
             bool ret = true;
@@ -85,7 +81,7 @@ private:
             UXLenT stack_top = stack.back();
 
             while (!terminate()) {
-                if (ptr->address == addr) return;
+                if (ptr->address == addr) break;
 
                 if (!step(stack_top)) break;
             }
@@ -95,7 +91,7 @@ private:
     Status origin, modified;
     std::map<UXLenT, UXLenT> &sync_point;
     std::vector<UXLenT> affected_address;
-    UXLenT sync_address; // zero stands for step out of function
+    UXLenT sync_address; // zero stands for return to caller
     bool sync;
 
     static bool is_link(usize reg) { return reg == 1 || reg == 5; }
@@ -112,7 +108,6 @@ private:
         }
     }
 
-public:
     RecordCompare(std::vector<BranchRecord> &origin, std::vector<BranchRecord> &modified,
                   std::map<UXLenT, UXLenT> &sync_point) :
             origin{origin}, modified{modified}, sync_point{sync_point}, affected_address{}, sync_address{0},
@@ -175,13 +170,26 @@ public:
 
         return std::move(affected_address);
     }
+
+public:
+
+    static std::vector<UXLenT> build(std::vector<BranchRecord> &origin, std::vector<BranchRecord> &modified,
+                                     std::map<UXLenT, UXLenT> &sync_point) {
+        return RecordCompare{origin, modified, sync_point}.compare();
+    }
 };
 
 
 int main(int argc, char **argv) {
     if (argc != 2) neutron_abort("receive one file name!");
 
+#if defined(__linux__)
+    int fd = open(argv[1], O_RDONLY | F_SHLCK);
+#elif defined(__APPLE__)
     int fd = open(argv[1], O_RDONLY | O_SHLOCK);
+#else
+#error "OS not supported"
+#endif
     if (fd == -1) neutron_abort("open file failed!");
 
     elf::MappedFileVisitor visitor{};
@@ -215,13 +223,13 @@ int main(int argc, char **argv) {
 
     for (auto &function: functions) {
         auto &func = function.second;
-        auto section = elf_header->sections(visitor)[func.section_header_index];
+        auto &section = elf_header->sections(visitor)[func.section_header_index];
 
         void *start = visitor.address((func.value - section.address) + section.offset, func.size);
         if (start == nullptr) neutron_abort("ELF file broken!");
 
-        auto blocks = BlockVisitor{}.blocking(func.value, start, func.size);
-        auto pos_dominator = DominatorTree<UXLenT, true>{blocks, 0}.semi_nca();
+        auto blocks = BlockVisitor::build(func.value, start, func.size);
+        auto pos_dominator = PosDominatorTree<UXLenT>::build(blocks, 0);
 
         sync_point.insert(pos_dominator.begin(), pos_dominator.end());
     }
@@ -239,7 +247,7 @@ int main(int argc, char **argv) {
     if (!mem2.load_elf(visitor)) neutron_abort("ELF file broken!");
     auto modified_record = LinuxFuzzerHart{0, mem2, modified_input}.start();
 
-    auto affected_address = RecordCompare{origin_record, modified_record, sync_point}.compare();
+    auto affected_address = RecordCompare::build(origin_record, modified_record, sync_point);
 
     std::cout << std::hex;
     for (auto &item: affected_address) {

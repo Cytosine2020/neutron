@@ -85,7 +85,9 @@ namespace neutron {
 
     class LinuxFuzzerHart : public LinuxHart<LinuxFuzzerHart> {
     private:
-        LinuxHart<LinuxFuzzerHart> *super() { return this; }
+        using SuperT = LinuxHart<LinuxFuzzerHart>;
+
+        SuperT *super() { return this; }
 
     protected:
         std::vector<BranchRecord> record;
@@ -94,7 +96,7 @@ namespace neutron {
 
     public:
         LinuxFuzzerHart(UXLenT hart_id, LinuxProgram<> &mem, std::vector<u8> &input) :
-                LinuxHart<LinuxFuzzerHart>{hart_id, mem}, input{input}, input_offset{0} {}
+                LinuxHart<LinuxFuzzerHart>{hart_id, mem}, record{}, input{input}, input_offset{0} {}
 
         RetT visit_jal_inst(riscv_isa::JALInst *inst) {
             record.emplace_back(BranchRecord::jal(get_pc(), inst->get_rd()));
@@ -105,7 +107,7 @@ namespace neutron {
         RetT visit_jalr_inst(riscv_isa::JALRInst *inst) {
             usize rs1 = inst->get_rs1();
             XLenT imm = inst->get_imm();
-            UXLenT target = get_bits<UXLenT, XLEN, 1, 1>(int_reg.get_x(rs1) + imm);
+            UXLenT target = get_bits<UXLenT, XLEN, 1, 1>(get_x(rs1) + imm);
 
             record.emplace_back(BranchRecord::jalr(get_pc(), target, inst->get_rd(), rs1));
 
@@ -113,8 +115,8 @@ namespace neutron {
         }
 
         RetT visit_beq_inst(riscv_isa::BEQInst *inst) {
-            UXLenT op1 = int_reg.get_x(inst->get_rs1());
-            UXLenT op2 = int_reg.get_x(inst->get_rs2());
+            UXLenT op1 = get_x(inst->get_rs1());
+            UXLenT op2 = get_x(inst->get_rs2());
 
             record.emplace_back(BranchRecord::beq(get_pc(), op1, op2));
 
@@ -122,8 +124,8 @@ namespace neutron {
         }
 
         RetT visit_bne_inst(riscv_isa::BNEInst *inst) {
-            UXLenT op1 = int_reg.get_x(inst->get_rs1());
-            UXLenT op2 = int_reg.get_x(inst->get_rs2());
+            UXLenT op1 = get_x(inst->get_rs1());
+            UXLenT op2 = get_x(inst->get_rs2());
 
             record.emplace_back(BranchRecord::bne(get_pc(), op1, op2));
 
@@ -131,8 +133,8 @@ namespace neutron {
         }
 
         RetT visit_blt_inst(riscv_isa::BLTInst *inst) {
-            UXLenT op1 = int_reg.get_x(inst->get_rs1());
-            UXLenT op2 = int_reg.get_x(inst->get_rs2());
+            UXLenT op1 = get_x(inst->get_rs1());
+            UXLenT op2 = get_x(inst->get_rs2());
 
             record.emplace_back(BranchRecord::blt(get_pc(), op1, op2));
 
@@ -140,8 +142,8 @@ namespace neutron {
         }
 
         RetT visit_bge_inst(riscv_isa::BGEInst *inst) {
-            UXLenT op1 = int_reg.get_x(inst->get_rs1());
-            UXLenT op2 = int_reg.get_x(inst->get_rs2());
+            UXLenT op1 = get_x(inst->get_rs1());
+            UXLenT op2 = get_x(inst->get_rs2());
 
             record.emplace_back(BranchRecord::bge(get_pc(), op1, op2));
 
@@ -149,8 +151,8 @@ namespace neutron {
         }
 
         RetT visit_bltu_inst(riscv_isa::BLTUInst *inst) {
-            UXLenT op1 = int_reg.get_x(inst->get_rs1());
-            UXLenT op2 = int_reg.get_x(inst->get_rs2());
+            UXLenT op1 = get_x(inst->get_rs1());
+            UXLenT op2 = get_x(inst->get_rs2());
 
             record.emplace_back(BranchRecord::bltu(get_pc(), op1, op2));
 
@@ -158,8 +160,8 @@ namespace neutron {
         }
 
         RetT visit_bgeu_inst(riscv_isa::BGEUInst *inst) {
-            UXLenT op1 = int_reg.get_x(inst->get_rs1());
-            UXLenT op2 = int_reg.get_x(inst->get_rs2());
+            UXLenT op1 = get_x(inst->get_rs1());
+            UXLenT op2 = get_x(inst->get_rs2());
 
             record.emplace_back(BranchRecord::bgeu(get_pc(), op1, op2));
 
@@ -237,7 +239,7 @@ namespace neutron {
         }
 
         std::vector<BranchRecord> start() {
-            while (visit() || supervisor_trap_handler(csr_reg[CSRRegT::SCAUSE]));
+            super()->start();
 
             return record;
         }

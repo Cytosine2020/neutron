@@ -3,8 +3,6 @@
 
 
 #include <iostream>
-#include <zconf.h>
-#include <cstdint>
 #include <cstddef>
 #include <type_traits>
 
@@ -14,7 +12,7 @@ namespace neutron {
         std::cerr << "Warn at file " << file << ", line " << line << ": " << msg << std::endl;
     }
 
-#define neutron_warn(msg) riscv_isa::_warn(__FILE__, __LINE__, msg)
+#define neutron_warn(msg) neutron::_warn(__FILE__, __LINE__, msg)
 
     __attribute__((noreturn)) void _abort(const char *file, int line, const char *msg) {
         std::cerr << "Abort at file " << file << ", line " << line << ": " << msg << std::endl;
@@ -22,7 +20,7 @@ namespace neutron {
         abort();
     }
 
-#define neutron_abort(msg) riscv_isa::_abort(__FILE__, __LINE__, msg)
+#define neutron_abort(msg) neutron::_abort(__FILE__, __LINE__, msg)
 
     __attribute__((noreturn)) void _unreachable(const char *file, int line, const char *msg) {
         std::cerr << "Unreachable at file " << file << ", line " << line << ": " << msg << std::endl;
@@ -30,10 +28,9 @@ namespace neutron {
         abort();
     }
 
-#define neutron_unreachable(msg) riscv_isa::_unreachable(__FILE__, __LINE__, msg)
+#define neutron_unreachable(msg) neutron::_unreachable(__FILE__, __LINE__, msg)
 
 #define neutron_unused __attribute__((unused))
-
 
     using i8 = int8_t;
     using u8 = u_int8_t;

@@ -14,10 +14,17 @@ public:
 int main(int argc, char **argv) {
     if (argc != 2) neutron_abort("receive one file name!");
 
+#if defined(__linux__)
+    int fd = open(argv[1], O_RDONLY | F_SHLCK);
+#elif defined(__APPLE__)
     int fd = open(argv[1], O_RDONLY | O_SHLOCK);
+#else
+#error "OS not supported"
+#endif
+
     if (fd == -1) neutron_abort("open file failed!");
 
-    MappedFileVisitor visitor{};
+    elf::MappedFileVisitor visitor{};
     if (!visitor.load_file(fd)) neutron_abort("memory map file failed!");
 
     LinuxProgram<> mem{};

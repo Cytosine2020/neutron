@@ -12,44 +12,44 @@
 #include "unix_std.hpp"
 
 
-#define neutron_syscall_0(func, reg) \
-    reg.set_x(IntRegT::A0, func())
+#define neutron_syscall_0(func) \
+    this->set_x(IntRegT::A0, func())
 
-#define neutron_syscall_1(func, reg) \
-    reg.set_x(IntRegT::A0, func(reg.get_x(IntRegT::A0)))
+#define neutron_syscall_1(func) \
+    this->set_x(IntRegT::A0, func(this->get_x(IntRegT::A0)))
 
-#define neutron_syscall_2(func, reg) \
-    reg.set_x(IntRegT::A0, func(reg.get_x(IntRegT::A0), \
-                                          reg.get_x(IntRegT::A1)))
+#define neutron_syscall_2(func) \
+    this->set_x(IntRegT::A0, func(this->get_x(IntRegT::A0), \
+                            this->get_x(IntRegT::A1)))
 
-#define neutron_syscall_3(func, reg) \
-    reg.set_x(IntRegT::A0, func(reg.get_x(IntRegT::A0), \
-                                          reg.get_x(IntRegT::A1), \
-                                          reg.get_x(IntRegT::A2)))
+#define neutron_syscall_3(func) \
+    this->set_x(IntRegT::A0, func(this->get_x(IntRegT::A0), \
+                                  this->get_x(IntRegT::A1), \
+                                  this->get_x(IntRegT::A2)))
 
-#define neutron_syscall_4(func, reg) \
-    reg.set_x(IntRegT::A0, func(reg.get_x(IntRegT::A0), \
-                                          reg.get_x(IntRegT::A1), \
-                                          reg.get_x(IntRegT::A2), \
-                                          reg.get_x(IntRegT::A3)))
+#define neutron_syscall_4(func) \
+    this->set_x(IntRegT::A0, func(this->get_x(IntRegT::A0), \
+                                  this->get_x(IntRegT::A1), \
+                                  this->get_x(IntRegT::A2), \
+                                  this->get_x(IntRegT::A3)))
 
-#define neutron_syscall_5(func, reg) \
-    reg.set_x(IntRegT::A0, func(reg.get_x(IntRegT::A0), \
-                                          reg.get_x(IntRegT::A1), \
-                                          reg.get_x(IntRegT::A2), \
-                                          reg.get_x(IntRegT::A3), \
-                                          reg.get_x(IntRegT::A4)))
+#define neutron_syscall_5(func) \
+    this->set_x(IntRegT::A0, func(this->get_x(IntRegT::A0), \
+                                  this->get_x(IntRegT::A1), \
+                                  this->get_x(IntRegT::A2), \
+                                  this->get_x(IntRegT::A3), \
+                                  this->get_x(IntRegT::A4)))
 
-#define neutron_syscall_6(func, reg) \
-    reg.set_x(IntRegT::A0, func(reg.get_x(IntRegT::A0), \
-                                          reg.get_x(IntRegT::A1), \
-                                          reg.get_x(IntRegT::A2), \
-                                          reg.get_x(IntRegT::A3), \
-                                          reg.get_x(IntRegT::A4), \
-                                          reg.get_x(IntRegT::A5)))
+#define neutron_syscall_6(func) \
+    this->set_x(IntRegT::A0, func(this->get_x(IntRegT::A0), \
+                                  this->get_x(IntRegT::A1), \
+                                  this->get_x(IntRegT::A2), \
+                                  this->get_x(IntRegT::A3), \
+                                  this->get_x(IntRegT::A4), \
+                                  this->get_x(IntRegT::A5)))
 
-#define neutron_syscall(num, func, reg) \
-    neutron_syscall_##num(func, reg)
+#define neutron_syscall(num, func) \
+    neutron_syscall_##num(func)
 
 
 namespace neutron {
@@ -88,7 +88,7 @@ namespace neutron {
             if (ptr == nullptr) {
                 return sub_type()->internal_interrupt(riscv_isa::trap::LOAD_PAGE_FAULT, addr);
             } else {
-                if (dest != 0) this->int_reg.set_x(dest, *ptr);
+                if (dest != 0) this->set_x(dest, *ptr);
                 return true;
             }
         }
@@ -104,7 +104,7 @@ namespace neutron {
             if (ptr == nullptr) {
                 return sub_type()->internal_interrupt(riscv_isa::trap::STORE_AMO_PAGE_FAULT, addr);
             } else {
-                *ptr = static_cast<ValT>(this->int_reg.get_x(src));
+                *ptr = static_cast<ValT>(this->get_x(src));
                 return true;
             }
         }
@@ -207,40 +207,40 @@ namespace neutron {
         }
 
         bool syscall_handler() {
-            switch (this->int_reg.get_x(IntRegT::A7)) {
+            switch (this->get_x(IntRegT::A7)) {
                 case syscall::close:
-                    neutron_syscall(1, sub_type()->sys_close, this->int_reg);
+                    neutron_syscall(1, sub_type()->sys_close);
                     return true;
                 case syscall::lseek:
-                    neutron_syscall(3, sub_type()->sys_lseek, this->int_reg);
+                    neutron_syscall(3, sub_type()->sys_lseek);
                     return true;
                 case syscall::read:
-                    neutron_syscall(3, sub_type()->sys_read, this->int_reg);
+                    neutron_syscall(3, sub_type()->sys_read);
                     return true;
                 case syscall::write:
-                    neutron_syscall(3, sub_type()->sys_write, this->int_reg);
+                    neutron_syscall(3, sub_type()->sys_write);
                     return true;
                 case syscall::fstat:
-                    neutron_syscall(2, sub_type()->sys_fstat, this->int_reg);
+                    neutron_syscall(2, sub_type()->sys_fstat);
                     return true;
                 case syscall::exit:
-                    std::cout << std::endl << "[exit " << this->int_reg.get_x(IntRegT::A0) << ']'
+                    std::cout << std::endl << "[exit " << this->get_x(IntRegT::A0) << ']'
                               << std::endl;
 
                     return false;
                 case syscall::brk:
-                    neutron_syscall(1, sys_brk, this->int_reg);
+                    neutron_syscall(1, sub_type()->sys_brk);
                     return true;
                 default:
                     std::cerr << "Invalid environment call number at " << std::hex << this->get_pc()
-                              << ", call number " << std::dec << this->int_reg.get_x(IntRegT::A7)
+                              << ", call number " << std::dec << this->get_x(IntRegT::A7)
                               << std::endl;
 
                     return false;
             }
         }
 
-        bool supervisor_trap_handler(XLenT cause) {
+        bool trap_handler(XLenT cause) {
             switch (cause) {
                 case riscv_isa::trap::INSTRUCTION_ADDRESS_MISALIGNED:
                 case riscv_isa::trap::INSTRUCTION_ACCESS_FAULT:
@@ -307,7 +307,7 @@ namespace neutron {
             }
         }
 
-        void start() { while (sub_type()->visit() || supervisor_trap_handler(this->csr_reg[CSRRegT::SCAUSE])); }
+        void start() { while (sub_type()->visit() || trap_handler(this->csr_reg[CSRRegT::SCAUSE])); }
     };
 }
 
