@@ -11,8 +11,8 @@ public:
 };
 
 
-int main(int argc, char **argv) {
-    if (argc != 2) neutron_abort("receive one file name!");
+int main(int argc, char **argv, char **envp) {
+    if (argc < 2) neutron_abort("receive one file name!");
 
 #if defined(__linux__)
     int fd = open(argv[1], O_RDONLY | F_SHLCK);
@@ -28,10 +28,8 @@ int main(int argc, char **argv) {
     if (!visitor.load_file(fd)) neutron_abort("memory map file failed!");
 
     LinuxProgram<> mem{};
-    if (!mem.load_elf(visitor)) neutron_abort("ELF file broken!");
+    if (!mem.load_elf(visitor, argc - 1, ++argv, envp)) neutron_abort("ELF file broken!");
 
     Core core{0, mem};
     core.start();
-
-    if (close(fd) != 0) neutron_abort("Close file failed!");
 }

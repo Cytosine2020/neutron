@@ -15,26 +15,26 @@ namespace neutron {
         elf::MappedFileVisitor visitor{};
         if (!visitor.load_file(fd)) return false;
 
-        auto *elf_header = elf::ELF32Header::read(visitor);
+        auto *elf_header = elf32::ELFHeader::read(visitor);
         if (elf_header == nullptr) return false;
-        if (elf_header->file_type != elf::ELF32Header::EXECUTABLE) return false;
+        if (elf_header->file_type != elf32::ELFHeader::EXECUTABLE) return false;
 
-        elf::ELF32StringTableHeader *string_table_header = elf_header->get_string_table_header(visitor);
+        elf32::ELFStringTableHeader *string_table_header = elf_header->get_string_table_header(visitor);
         if (string_table_header == nullptr) return false;
         auto string_table = string_table_header->get_string_table(visitor);
 
-        std::map<u32, elf::ELF32SymbolTableHeader::SymbolTableEntry &> objects, functions;
+        std::map<u32, elf32::SymbolTableHeader::SymbolTableEntry &> objects, functions;
 
         for (auto &section: elf_header->sections(visitor)) {
-            auto *symbol_table_header = elf::ELF32SectionHeader::cast<elf::ELF32SymbolTableHeader>(&section, visitor);
+            auto *symbol_table_header = elf32::SectionHeader::cast<elf32::SymbolTableHeader>(&section, visitor);
             if (symbol_table_header == nullptr) continue;
 
             for (auto &symbol: symbol_table_header->get_symbol_table(visitor)) {
                 switch (symbol.get_type()) {
-                    case elf::ELF32SymbolTableHeader::OBJECT:
+                    case elf32::SymbolTableHeader::OBJECT:
                         objects.emplace(symbol.value, symbol);
                         break;
-                    case elf::ELF32SymbolTableHeader::FUNC:
+                    case elf32::SymbolTableHeader::FUNC:
                         functions.emplace(symbol.value, symbol);
                         break;
                     default:
@@ -46,7 +46,7 @@ namespace neutron {
         riscv_isa::Dump dump{std::cout};
 
         for (auto &section: elf_header->sections(visitor)) {
-            if (section.section_type != elf::ELF32SectionHeader::PROGRAM_BITS) continue;
+            if (section.section_type != elf32::SectionHeader::PROGRAM_BITS) continue;
 
             char *section_name = section_string_table.get_str(section.name);
             if (section_name == nullptr) return false;

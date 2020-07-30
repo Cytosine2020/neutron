@@ -65,7 +65,7 @@ namespace neutron {
             return _get_relate_vertex<VertexT, post, direction>::inner(vertex);
         }
 
-        explicit DominatorTree(GraghT &graph, VertexT entry) : entry{entry}, graph{graph}, vertex{}, vertex_info{} {};
+        DominatorTree(GraghT &graph, VertexT entry) : entry{entry}, graph{graph}, vertex{}, vertex_info{} {};
 
         void depth_first_search() {
             vertex.clear();

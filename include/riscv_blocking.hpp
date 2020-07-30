@@ -21,7 +21,7 @@ namespace neutron {
 
         static bool is_link(usize reg) { return reg == 1 || reg == 5; }
 
-        UXLenT reularize_addr(UXLenT addr, UXLenT guest, usize size) {
+        UXLenT regularize_addr(UXLenT addr, UXLenT guest, usize size) {
             if (addr < guest || addr >= guest + size) {
                 return 0;
             } else {
@@ -48,9 +48,9 @@ namespace neutron {
             for (auto &item: block) {
                 UXLenT vertex = item.first;
 
-                graph.add_vertex(vertex, reularize_addr(item.second.first, guest, size));
+                graph.add_vertex(vertex, regularize_addr(item.second.first, guest, size));
                 if (item.second.first != item.second.second)
-                    graph.add_vertex(vertex, reularize_addr(item.second.second, guest, size));
+                    graph.add_vertex(vertex, regularize_addr(item.second.second, guest, size));
             }
 
             return graph;

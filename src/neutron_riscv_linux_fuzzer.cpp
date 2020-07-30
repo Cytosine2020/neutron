@@ -180,7 +180,7 @@ public:
 };
 
 
-int main(int argc, char **argv) {
+int main(int argc, char **argv, char **envp) {
     if (argc != 2) neutron_abort("receive one file name!");
 
 #if defined(__linux__)
@@ -195,22 +195,22 @@ int main(int argc, char **argv) {
     elf::MappedFileVisitor visitor{};
     if (!visitor.load_file(fd)) neutron_abort("memory map file failed!");
 
-    auto *elf_header = elf::ELF32Header::read(visitor);
+    auto *elf_header = elf32::ELFHeader::read(visitor);
     if (elf_header == nullptr) neutron_abort("ELF header broken!");
-    if (elf_header->file_type != elf::ELF32Header::EXECUTABLE) neutron_abort("ELF file not executable!");
+    if (elf_header->file_type != elf32::ELFHeader::EXECUTABLE) neutron_abort("ELF file not executable!");
 
-    std::map<u32, elf::ELF32SymbolTableHeader::SymbolTableEntry &> objects, functions;
+    std::map<u32, elf32::SymbolTableHeader::SymbolTableEntry &> objects, functions;
 
     for (auto &section: elf_header->sections(visitor)) {
-        auto *symbol_table_header = elf::ELF32SectionHeader::cast<elf::ELF32SymbolTableHeader>(&section, visitor);
+        auto *symbol_table_header = elf32::SectionHeader::cast<elf32::SymbolTableHeader>(&section, visitor);
         if (symbol_table_header == nullptr) continue;
 
-        for (auto &symbol: symbol_table_header->get_symbol_table(visitor)) {
+        for (auto &symbol: symbol_table_header->get_table(visitor)) {
             switch (symbol.get_type()) {
-                case elf::ELF32SymbolTableHeader::OBJECT:
+                case elf32::SymbolTableHeader::OBJECT:
                     objects.emplace(symbol.value, symbol);
                     break;
-                case elf::ELF32SymbolTableHeader::FUNC:
+                case elf32::SymbolTableHeader::FUNC:
                     functions.emplace(symbol.value, symbol);
                     break;
                 default:
@@ -237,14 +237,14 @@ int main(int argc, char **argv) {
     std::vector<u8> origin_input{};
 
     LinuxProgram<> mem1{};
-    if (!mem1.load_elf(visitor)) neutron_abort("ELF file broken!");
+    if (!mem1.load_elf(visitor, argc - 1, ++argv, envp)) neutron_abort("ELF file broken!");
     auto origin_record = LinuxFuzzerHart{0, mem1, origin_input}.start();
 
     std::vector<u8> modified_input = origin_input;
     modified_input[0] = static_cast<u8>(rand());
 
     LinuxProgram<> mem2{};
-    if (!mem2.load_elf(visitor)) neutron_abort("ELF file broken!");
+    if (!mem2.load_elf(visitor, argc - 1, ++argv, envp)) neutron_abort("ELF file broken!");
     auto modified_record = LinuxFuzzerHart{0, mem2, modified_input}.start();
 
     auto affected_address = RecordCompare::build(origin_record, modified_record, sync_point);
@@ -254,6 +254,4 @@ int main(int argc, char **argv) {
         std::cout << item << std::endl;
     }
     std::cout << std::dec;
-
-    if (close(fd) != 0) neutron_abort("Close file failed!");
 }
