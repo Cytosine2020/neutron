@@ -2,6 +2,46 @@
 #define NEUTRON_UNIX_STD_HPP
 
 
+#define neutron_syscall_0(func) \
+    this->set_x(IntRegT::A0, func())
+
+#define neutron_syscall_1(func) \
+    this->set_x(IntRegT::A0, func(this->get_x(IntRegT::A0)))
+
+#define neutron_syscall_2(func) \
+    this->set_x(IntRegT::A0, func(this->get_x(IntRegT::A0), \
+                            this->get_x(IntRegT::A1)))
+
+#define neutron_syscall_3(func) \
+    this->set_x(IntRegT::A0, func(this->get_x(IntRegT::A0), \
+                                  this->get_x(IntRegT::A1), \
+                                  this->get_x(IntRegT::A2)))
+
+#define neutron_syscall_4(func) \
+    this->set_x(IntRegT::A0, func(this->get_x(IntRegT::A0), \
+                                  this->get_x(IntRegT::A1), \
+                                  this->get_x(IntRegT::A2), \
+                                  this->get_x(IntRegT::A3)))
+
+#define neutron_syscall_5(func) \
+    this->set_x(IntRegT::A0, func(this->get_x(IntRegT::A0), \
+                                  this->get_x(IntRegT::A1), \
+                                  this->get_x(IntRegT::A2), \
+                                  this->get_x(IntRegT::A3), \
+                                  this->get_x(IntRegT::A4)))
+
+#define neutron_syscall_6(func) \
+    this->set_x(IntRegT::A0, func(this->get_x(IntRegT::A0), \
+                                  this->get_x(IntRegT::A1), \
+                                  this->get_x(IntRegT::A2), \
+                                  this->get_x(IntRegT::A3), \
+                                  this->get_x(IntRegT::A4), \
+                                  this->get_x(IntRegT::A5)))
+
+#define neutron_syscall(num, func) \
+    neutron_syscall_##num(func)
+
+
 #define __ARCH_WANT_NEW_STAT
 
 namespace neutron {
@@ -383,6 +423,72 @@ namespace neutron {
             chown = 1039,
         };
     }
+
+    struct utsname {
+        static constexpr usize UTSNAME_LENGTH = 65;
+
+        char sysname[UTSNAME_LENGTH];       // Name of the implementation of the operating system.
+        char nodename[UTSNAME_LENGTH];      // Name of this node on the network.
+        char release[UTSNAME_LENGTH];       // Current release level of this implementation.
+        char version[UTSNAME_LENGTH];       // Current version level of this release.
+        char machine[UTSNAME_LENGTH];       // Name of the hardware type the system is running on.
+        char domainname[UTSNAME_LENGTH];
+    };
+
+    struct stat {
+        struct timespec {
+            u32 tv_sec;
+            u32 tv_nsec;
+        };
+
+        u32 st_dev;                 /* Device.  */
+        u32 st_ino;                 /* File serial number. */
+        u32 st_mode;                /* File mode.  */
+        u32 st_nlink;               /* Link count.  */
+        u32 st_uid;                 /* User ID of the file's owner. */
+        u32 st_gid;                 /* Group ID of the file's group.*/
+        u32 st_rdev;                /* Device number, if device.  */
+        u32 __pad1;
+        u32 st_size;                /* Size of file, in bytes. */
+        u32 st_blksize;             /* Optimal block size for I/O.  */
+        u32 __pad2;
+        u32 st_blocks;              /* 512-byte blocks */
+        timespec atime;
+        timespec mtime;             /* Time of last modification.  */
+        timespec ctime;             /* Time of last status change.  */
+        u32 __glibc_reserved[2];
+
+    };
+
+    struct statx {
+        struct statx_timestamp {
+            u64 tv_sec;
+            u32 tv_nsec;
+            u32 __statx_timestamp_pad1[1];
+        };
+
+        u32 stx_mask;
+        u32 stx_blksize;
+        u64 stx_attributes;
+        u32 stx_nlink;
+        u32 stx_uid;
+        u32 stx_gid;
+        u16 stx_mode;
+        u16 __statx_pad1[1];
+        u16 stx_ino;
+        u64 stx_size;
+        u64 stx_blocks;
+        u64 stx_attributes_mask;
+        statx_timestamp stx_atime;
+        statx_timestamp stx_btime;
+        statx_timestamp stx_ctime;
+        statx_timestamp stx_mtime;
+        u32 stx_rdev_major;
+        u32 stx_rdev_minor;
+        u32 stx_dev_major;
+        u32 stx_dev_minor;
+        u64 __statx_pad2[14];
+    };
 }
 
 

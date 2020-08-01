@@ -7,6 +7,7 @@
 
 using namespace neutron;
 
+extern char **environ;
 
 using UXLenT = riscv_isa::xlen_trait::UXLenT;
 using XLenT = riscv_isa::xlen_trait::XLenT;
@@ -180,20 +181,11 @@ public:
 };
 
 
-int main(int argc, char **argv, char **envp) {
-    if (argc != 2) neutron_abort("receive one file name!");
+int main(int argc, char **argv) {
+    if (argc < 2) neutron_abort("receive one file name!");
 
-#if defined(__linux__)
-    int fd = open(argv[1], O_RDONLY | F_SHLCK);
-#elif defined(__APPLE__)
-    int fd = open(argv[1], O_RDONLY | O_SHLOCK);
-#else
-#error "OS not supported"
-#endif
-    if (fd == -1) neutron_abort("open file failed!");
-
-    elf::MappedFileVisitor visitor{};
-    if (!visitor.load_file(fd)) neutron_abort("memory map file failed!");
+    elf::MappedFileVisitor visitor = elf::MappedFileVisitor::open_elf(argv[1]);
+    if (visitor.get_fd() == -1) neutron_abort("memory map file failed!");
 
     auto *elf_header = elf32::ELFHeader::read(visitor);
     if (elf_header == nullptr) neutron_abort("ELF header broken!");
@@ -237,14 +229,14 @@ int main(int argc, char **argv, char **envp) {
     std::vector<u8> origin_input{};
 
     LinuxProgram<> mem1{};
-    if (!mem1.load_elf(visitor, argc - 1, ++argv, envp)) neutron_abort("ELF file broken!");
+    if (!mem1.load_elf(argv[1], argc - 1, argv + 1, environ)) neutron_abort("ELF file broken!");
     auto origin_record = LinuxFuzzerHart{0, mem1, origin_input}.start();
 
     std::vector<u8> modified_input = origin_input;
     modified_input[0] = static_cast<u8>(rand());
 
     LinuxProgram<> mem2{};
-    if (!mem2.load_elf(visitor, argc - 1, ++argv, envp)) neutron_abort("ELF file broken!");
+    if (!mem2.load_elf(argv[1], argc - 1, argv + 1, environ)) neutron_abort("ELF file broken!");
     auto modified_record = LinuxFuzzerHart{0, mem2, modified_input}.start();
 
     auto affected_address = RecordCompare::build(origin_record, modified_record, sync_point);

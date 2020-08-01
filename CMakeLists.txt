@@ -3,7 +3,7 @@ project(neutron)
 
 set(CMAKE_CXX_STANDARD 11)
 
-include_directories(include sysroot riscv_isa/include elf/include)
+include_directories(include riscv_isa/include elf/include)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -fno-exceptions -fno-rtti")
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O2")

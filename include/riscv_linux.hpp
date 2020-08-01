@@ -2,6 +2,16 @@
 #define NEUTRON_RISCV_LINUX_HPP
 
 
+#include <cerrno>
+#include <pthread.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/uio.h>
+#include <sys/utsname.h>
+#include <sys/syscall.h>
+
 #include <iostream>
 #include <map>
 
@@ -12,54 +22,18 @@
 #include "unix_std.hpp"
 
 
-#define neutron_syscall_0(func) \
-    this->set_x(IntRegT::A0, func())
-
-#define neutron_syscall_1(func) \
-    this->set_x(IntRegT::A0, func(this->get_x(IntRegT::A0)))
-
-#define neutron_syscall_2(func) \
-    this->set_x(IntRegT::A0, func(this->get_x(IntRegT::A0), \
-                            this->get_x(IntRegT::A1)))
-
-#define neutron_syscall_3(func) \
-    this->set_x(IntRegT::A0, func(this->get_x(IntRegT::A0), \
-                                  this->get_x(IntRegT::A1), \
-                                  this->get_x(IntRegT::A2)))
-
-#define neutron_syscall_4(func) \
-    this->set_x(IntRegT::A0, func(this->get_x(IntRegT::A0), \
-                                  this->get_x(IntRegT::A1), \
-                                  this->get_x(IntRegT::A2), \
-                                  this->get_x(IntRegT::A3)))
-
-#define neutron_syscall_5(func) \
-    this->set_x(IntRegT::A0, func(this->get_x(IntRegT::A0), \
-                                  this->get_x(IntRegT::A1), \
-                                  this->get_x(IntRegT::A2), \
-                                  this->get_x(IntRegT::A3), \
-                                  this->get_x(IntRegT::A4)))
-
-#define neutron_syscall_6(func) \
-    this->set_x(IntRegT::A0, func(this->get_x(IntRegT::A0), \
-                                  this->get_x(IntRegT::A1), \
-                                  this->get_x(IntRegT::A2), \
-                                  this->get_x(IntRegT::A3), \
-                                  this->get_x(IntRegT::A4), \
-                                  this->get_x(IntRegT::A5)))
-
-#define neutron_syscall(num, func) \
-    neutron_syscall_##num(func)
-
-
 namespace neutron {
-    template<typename SubT>
+    template<typename SubT, typename xlen = typename riscv_isa::xlen_trait>
     class LinuxHart : public riscv_isa::Hart<SubT> {
     private:
+        using iovec = typename LinuxProgram<xlen>::iovec;
+
         SubT *sub_type() { return static_cast<SubT *>(this); }
 
     protected:
-        LinuxProgram<> &pcb;
+        LinuxProgram<xlen> &pcb;
+        std::string riscv_sysroot;
+        std::ostream &debug_stream;
         bool debug;
 
     public:
@@ -70,7 +44,8 @@ namespace neutron {
         using CSRRegT = typename riscv_isa::Hart<SubT>::CSRRegT;
 
         LinuxHart(UXLenT hart_id, LinuxProgram<> &mem) :
-                riscv_isa::Hart<SubT>{hart_id, mem.pc, mem.int_reg}, pcb{mem}, debug{true} {
+                riscv_isa::Hart<SubT>{hart_id, mem.pc, mem.int_reg}, pcb{mem},
+                riscv_sysroot{getenv("RISCV_SYSROOT")}, debug_stream{std::cout}, debug{true} {
             this->cur_level = riscv_isa::USER_MODE;
             dup(0); // todo: ad hoc
             dup(1);
@@ -163,62 +138,96 @@ namespace neutron {
 
 #endif // defined(__RV_SUPERVISOR_MODE__)
 
-        int get_host_fd(int fd) { return fd + 3; }
+        int get_host_fd(int fd) { return fd > 0 ? fd + 3 : fd; }
 
-        int get_guest_fd(int fd) { return fd - 3; }
+        int get_guest_fd(int fd) { return fd > 0 ? fd - 3 : fd; }
 
-        XLenT sys_faccessat(int dirfd, UXLenT pathname, XLenT mode, XLenT flags) {
-            int ret;
+        std::string file_name_resolve(const std::string &origin) {
+            if (origin[0] == '/') {
+                if (origin == "/etc/ld.so.cache") return riscv_sysroot + origin;
+                if (origin == "/etc/ld.so.preload") return riscv_sysroot + origin;
+                if (access((riscv_sysroot + origin).c_str(), F_OK) == 0) return riscv_sysroot + origin;
+            }
 
-            char *name = pcb.string_copy_from_guest(pathname);
+            return origin;
+        }
 
-            if (name == nullptr) {
-                ret = -EFAULT;
+        XLenT sys_getcwd(UXLenT buf, XLenT size) {
+            // todo: remove riscv system root
+
+            char *host_buf = new char[size];
+
+            int ret = buf;
+
+            char *result = getcwd(host_buf, size);
+
+            if (result == host_buf) {
+                usize len = strlen(host_buf);
+                usize byte = pcb.memory_copy_to_guest(buf, host_buf, len);
+                if (byte != len) {
+                    ret = -EFAULT;
+                }
             } else {
-                ret = faccessat(dirfd, name, mode, flags);
-                if (ret == -1) { ret = -errno; }
+                ret = -errno;
             }
 
             if (debug) {
-                std::cout << "system call: " << ret
-                          << " = faccessat(<dirfd> " << dirfd
-                          << ", <pathname> " << name
-                          << ", <mode> " << mode
-                          << ", <flags> " << flags
-                          << ");" << std::endl;
+                debug_stream << "system call: " << ret
+                             << " = getcwd(<buf> " << buf
+                             << ", <size> " << size
+                             << ");" << std::endl;
             }
 
-            delete[] name;
+            return ret;
+        }
+
+        XLenT sys_faccessat(int dirfd, UXLenT pathname, XLenT mode, XLenT flags) {
+            int ret;
+            std::string name{};
+
+            if (pcb.string_copy_from_guest(pathname, name)) {
+                auto real_name = file_name_resolve(name);
+
+                ret = faccessat(get_host_fd(dirfd), real_name.c_str(), mode, flags);
+                if (ret == -1) { ret = -errno; }
+            } else {
+                ret = -EFAULT;
+            }
+
+            if (debug) {
+                debug_stream << "system call: " << ret
+                             << " = faccessat(<dirfd> " << dirfd
+                             << ", <pathname> " << name
+                             << ", <mode> " << mode
+                             << ", <flags> " << flags
+                             << ");" << std::endl;
+            }
 
             return ret;
         }
 
         XLenT sys_openat(int dirfd, UXLenT pathname, XLenT flags, XLenT mode) {
             int ret;
+            std::string name{};
 
-            char *name = pcb.string_copy_from_guest(pathname);
+            if (pcb.string_copy_from_guest(pathname, name)) {
+                auto real_name = file_name_resolve(name);
 
-            if (name == nullptr) {
-                ret = -EFAULT;
+                ret = openat(get_host_fd(dirfd), real_name.c_str(), flags, mode);
+                if (ret == -1) { ret = -errno; }
+                else { ret = get_guest_fd(ret); }
             } else {
-                ret = openat(dirfd, name, flags, mode);
-                if (ret == -1) {
-                    ret = -errno;
-                } else {
-                    ret = get_guest_fd(ret);
-                }
+                ret = -EFAULT;
             }
 
             if (debug) {
-                std::cout << "system call: " << ret
-                          << " = openat(<dirfd> " << dirfd
-                          << ", <pathname> " << name
-                          << ", <flags> " << flags
-                          << ", <mode> " << mode
-                          << ");" << std::endl;
+                debug_stream << "system call: " << ret
+                             << " = openat(<dirfd> " << dirfd
+                             << ", <pathname> " << name
+                             << ", <flags> " << flags
+                             << ", <mode> " << mode
+                             << ");" << std::endl;
             }
-
-            delete[] name;
 
             return ret;
         }
@@ -231,9 +240,9 @@ namespace neutron {
             }
 
             if (debug) {
-                std::cout << "system call: " << ret
-                << " = close(<fd> " << fd
-                << ");" << std::endl;
+                debug_stream << "system call: " << ret
+                             << " = close(<fd> " << fd
+                             << ");" << std::endl;
             }
 
             return ret;
@@ -247,103 +256,211 @@ namespace neutron {
             }
 
             if (debug) {
-                std::cout << "system call: " << ret
-                          << " = lseek(<fd> " << fd
-                          << ", <offset>" << offset
-                          << ", <whence>" << whence
-                          << ");" << std::endl;
+                debug_stream << "system call: " << ret
+                             << " = lseek(<fd> " << fd
+                             << ", <offset> " << offset
+                             << ", <whence> " << whence
+                             << ");" << std::endl;
             }
 
             return ret;
         }
 
         XLenT sys_read(int fd, UXLenT addr, UXLenT size) {
-            char *buffer = new char[size];
+            int ret;
 
-            int ret = read(get_host_fd(fd), buffer, size);
-            UXLenT byte;
+            std::vector<::iovec> vec{};
 
-            if (ret == -1) {
-                ret = -errno;
+            if (pcb.memory_get_vector(addr, size, riscv_isa::W_BIT, vec)) {
+                ret = readv(get_host_fd(fd), vec.data(), vec.size());
+                if (ret == -1) { ret = -errno; }
             } else {
-                byte = pcb.memory_copy_to_guest(addr, buffer, ret);
-                if (byte != static_cast<UXLenT>(ret)) { ret = -EFAULT; }
+                ret = -EFAULT;
             }
 
-            delete[] buffer;
-
             if (debug) {
-                std::cout << "system call: " << ret
-                          << " = read(<fd> " << fd
-                          << ", <addr>" << addr
-                          << ", <size>" << size
-                          << ");" << std::endl;
+                debug_stream << "system call: " << ret
+                             << " = read(<fd> " << fd
+                             << ", <addr> " << addr
+                             << ", <size> " << size
+                             << ");" << std::endl;
             }
 
             return ret;
         }
 
         XLenT sys_write(int fd, UXLenT addr, UXLenT size) {
-            char *buffer = new char[size];
-
-            UXLenT byte = pcb.memory_copy_from_guest(buffer, addr, size);
             int ret;
 
-            if (byte == size) {
-                ret = write(get_host_fd(fd), buffer, byte);
+            std::vector<::iovec> vec{};
+
+            if (pcb.memory_get_vector(addr, size, riscv_isa::R_BIT, vec)) {
+                ret = writev(get_host_fd(fd), vec.data(), vec.size());
                 if (ret == -1) { ret = -errno; }
             } else {
                 ret = -EFAULT;
             }
 
-            delete[] buffer;
-
             if (debug) {
-                std::cout << "system call: " << ret
-                          << " = write(<fd> " << fd
-                          << ", <addr>" << addr
-                          << ", <size>" << size
-                          << ");" << std::endl;
+                debug_stream << "system call: " << ret
+                             << " = write(<fd> " << fd
+                             << ", <addr> " << addr
+                             << ", <size> " << size
+                             << ");" << std::endl;
             }
 
             return ret;
         }
 
         XLenT sys_readv(int fd, UXLenT iov, UXLenT iovcnt) {
-            (void) fd;
-            (void) iov;
-            (void) iovcnt;
+            int ret;
 
-            return -1; // todo
+            std::vector<::iovec> vec{};
+
+            if (pcb.memory_convert_io_vec(iov, iovcnt, riscv_isa::W_BIT, vec)) {
+                ret = readv(get_host_fd(fd), vec.data(), vec.size());
+
+                if (ret == -1) { ret = -errno; }
+            } else {
+                ret = -EINVAL;
+            }
+
+            if (debug) {
+                debug_stream << "system call: " << ret
+                             << " = readv(<fd> " << fd
+                             << ", <iov> " << iov
+                             << ", <iovcnt> " << iovcnt
+                             << ");" << std::endl;
+            }
+
+            return ret;
         }
 
         XLenT sys_writev(int fd, UXLenT iov, UXLenT iovcnt) {
-            (void) fd;
-            (void) iov;
-            (void) iovcnt;
+            int ret;
 
-            return -1; // todo
+            std::vector<::iovec> vec{};
+
+            if (pcb.memory_convert_io_vec(iov, iovcnt, riscv_isa::R_BIT, vec)) {
+                ret = writev(get_host_fd(fd), vec.data(), vec.size());
+
+                if (ret == -1) { ret = -errno; }
+            } else {
+                ret = -EINVAL;
+            }
+
+            if (debug) {
+                debug_stream << "system call: " << ret
+                             << " = writev(<fd> " << fd
+                             << ", <iov> " << iov
+                             << ", <iovcnt> " << iovcnt
+                             << ");" << std::endl;
+            }
+
+            return ret;
         }
 
         XLenT sys_fstat(UXLenT fd, UXLenT addr) {
-            (void) fd;
-            (void) addr;
-            return -1; // todo
+            struct ::stat host_buf{};
+            stat guest_buf{};
+
+            int ret = fstat(get_host_fd(fd), &host_buf);
+
+            if (ret == 0) {
+                guest_buf.st_dev = host_buf.st_dev;
+                guest_buf.st_ino = host_buf.st_ino;
+                guest_buf.st_mode = host_buf.st_mode;
+                guest_buf.st_nlink = host_buf.st_nlink;
+                guest_buf.st_uid = host_buf.st_uid;
+                guest_buf.st_gid = host_buf.st_gid;
+                guest_buf.st_rdev = host_buf.st_rdev;
+                guest_buf.st_size = host_buf.st_size;
+                guest_buf.st_blksize = host_buf.st_blksize;
+                guest_buf.st_blocks = host_buf.st_blocks;
+#if defined(__linux__)
+                guest_buf.atime.tv_sec = host_buf.st_atim.tv_sec;
+                guest_buf.atime.tv_nsec = host_buf.st_atim.tv_nsec;
+                guest_buf.mtime.tv_sec = host_buf.st_mtim.tv_sec;
+                guest_buf.mtime.tv_nsec = host_buf.st_mtim.tv_nsec;
+                guest_buf.ctime.tv_sec = host_buf.st_ctim.tv_sec;
+                guest_buf.ctime.tv_nsec = host_buf.st_ctim.tv_nsec;
+#elif defined(__APPLE__)
+                guest_buf.atime.tv_sec = host_buf.st_atimespec.tv_sec;
+                guest_buf.atime.tv_nsec = host_buf.st_atimespec.tv_nsec;
+                guest_buf.mtime.tv_sec = host_buf.st_mtimespec.tv_sec;
+                guest_buf.mtime.tv_nsec = host_buf.st_mtimespec.tv_nsec;
+                guest_buf.ctime.tv_sec = host_buf.st_ctimespec.tv_sec;
+                guest_buf.ctime.tv_nsec = host_buf.st_ctimespec.tv_nsec;
+#endif
+
+                if (pcb.memory_copy_to_guest(addr, &guest_buf, sizeof(guest_buf)) != sizeof(guest_buf)) {
+                    ret = -EFAULT;
+                }
+            } else {
+                ret = -errno;
+            }
+
+            if (debug) {
+                debug_stream << "system call: " << ret
+                             << " = fstatv(<fd> " << fd
+                             << ", <addr> "
+                             << ");" << std::endl;
+            }
+
+            return ret;
         }
 
         XLenT sys_uname(UXLenT buf) {
             (void) buf;
-            return -1; // todo
+
+            struct ::utsname host_buf{};
+            utsname guest_buf{};
+
+            int ret = uname(&host_buf);
+
+            if (ret == 0) {
+                strncpy(guest_buf.sysname, "Linux", sizeof(guest_buf.sysname) - 1);
+                strncpy(guest_buf.nodename, host_buf.nodename, sizeof(guest_buf.nodename) - 1);
+                strncpy(guest_buf.release, host_buf.release, sizeof(guest_buf.release) - 1);
+                strncpy(guest_buf.version, host_buf.version, sizeof(guest_buf.version) - 1);
+                strncpy(guest_buf.machine, "riscv32", sizeof(guest_buf.machine) - 1);
+
+                if (pcb.memory_copy_to_guest(buf, &guest_buf, sizeof(guest_buf)) != sizeof(guest_buf)) {
+                    ret = -EFAULT;
+                }
+            } else {
+                ret = -errno;
+            }
+
+            if (debug) {
+                debug_stream << "system call: " << ret
+                             << " = uname(<buf> struct utsname{<sysname> " << guest_buf.sysname
+                             << ", <nodename> " << guest_buf.nodename
+                             << ", <release> " << guest_buf.release
+                             << ", <version> " << guest_buf.version
+                             << ", <machine> " << guest_buf.machine
+                             << "})" << std::endl;
+            }
+
+            return ret;
         }
 
         XLenT sys_brk(UXLenT addr) {
-            return pcb.set_brk(addr);
+            int ret = pcb.set_brk(addr);
+
+            if (debug) {
+                debug_stream << "system call: " << ret
+                << " = brk(<addr> " << addr
+                << ");" << std::endl;
+            }
+
+            return ret;
         }
 
         XLenT sys_getpid() {
             int ret = getpid();
 
-            if (debug) { std::cout << "system call: " << ret << " = getpid();" << std::endl; }
+            if (debug) { debug_stream << "system call: " << ret << " = getpid();" << std::endl; }
 
             return ret;
         }
@@ -351,7 +468,7 @@ namespace neutron {
         XLenT sys_getppid() {
             int ret = getppid();
 
-            if (debug) { std::cout << "system call: " << ret << " = getppid();" << std::endl; }
+            if (debug) { debug_stream << "system call: " << ret << " = getppid();" << std::endl; }
 
             return ret;
         }
@@ -359,7 +476,7 @@ namespace neutron {
         XLenT sys_getuid() {
             int ret = getuid();
 
-            if (debug) { std::cout << "system call: " << ret << " = getuid();" << std::endl; }
+            if (debug) { debug_stream << "system call: " << ret << " = getuid();" << std::endl; }
 
             return ret;
         }
@@ -367,7 +484,7 @@ namespace neutron {
         XLenT sys_geteuid() {
             int ret = geteuid();
 
-            if (debug) { std::cout << "system call: " << ret << " = geteuid();" << std::endl; }
+            if (debug) { debug_stream << "system call: " << ret << " = geteuid();" << std::endl; }
 
             return ret;
         }
@@ -375,7 +492,7 @@ namespace neutron {
         XLenT sys_getgid() {
             int ret = getgid();
 
-            if (debug) { std::cout << "system call: " << ret << " = getgid();" << std::endl; }
+            if (debug) { debug_stream << "system call: " << ret << " = getgid();" << std::endl; }
 
             return ret;
         }
@@ -383,31 +500,180 @@ namespace neutron {
         XLenT sys_getegid() {
             int ret = getegid();
 
-            if (debug) { std::cout << "system call: " << ret << " = getegid();" << std::endl; }
+            if (debug) { debug_stream << "system call: " << ret << " = getegid();" << std::endl; }
 
             return ret;
         }
 
         XLenT sys_gettid() {
-            int ret = gettid();
+            pid_t ret = ::syscall(SYS_gettid);
 
-            if (debug) { std::cout << "system call: " << ret << " = gettid();" << std::endl; }
+            if (debug) { debug_stream << "system call: " << ret << " = gettid();" << std::endl; }
 
             return ret;
         }
 
         XLenT sys_sysinfo(UXLenT info) {
             (void) info;
-            return -1;
+
+            if (debug) {
+                debug_stream << "system call: "
+                             << " = sysinfo("
+                             << ");" << std::endl;
+            }
+
+            return -1; // todo
+        }
+
+        XLenT sys_mmap(UXLenT addr, UXLenT length, XLenT prot, XLenT flags, XLenT fd, UXLenT offset) {
+            int ret;
+            int fix = false;
+            void *map = MAP_FAILED;
+
+            riscv_isa::MemoryProtection guest_prot = riscv_isa::NOT_PRESENT;
+            int host_prot = 0;
+
+            if ((prot & PROT_EXEC) > 0) {
+                if ((prot & PROT_WRITE) > 0) {
+                    guest_prot = riscv_isa::EXECUTE_READ_WRITE;
+                    host_prot = PROT_READ | PROT_WRITE;
+                } else if ((prot & PROT_READ) > 0) {
+                    guest_prot = riscv_isa::EXECUTE_READ;
+                    host_prot = PROT_READ;
+                } else {
+                    guest_prot = riscv_isa::EXECUTE;
+                    host_prot = PROT_READ;
+                }
+            } else {
+                if ((prot & PROT_WRITE) > 0) {
+                    guest_prot = riscv_isa::READ_WRITE;
+                    host_prot = PROT_READ | PROT_WRITE;
+                } else {
+                    guest_prot = riscv_isa::READ;
+                    host_prot = PROT_READ;
+                }
+            }
+
+            UXLenT guest_addr = addr / RISCV_PAGE_SIZE * RISCV_PAGE_SIZE;
+            UXLenT guest_length = divide_ceil(length, RISCV_PAGE_SIZE) * RISCV_PAGE_SIZE;
+
+            if ((flags & MAP_FIXED) > 0) {
+                if (addr != guest_addr) {
+                    ret = -EINVAL;
+                    goto end;
+                }
+
+                fix = true;
+                flags &= (~MAP_FIXED);
+            } // todo: replace
+
+            if ((flags & MAP_FIXED_NOREPLACE) > 0) { neutron_abort("MAP_FIXED_NOREPLACE not support!"); }
+
+            if ((flags & MAP_GROWSDOWN) > 0) { neutron_abort("MAP_GROWSDOWN not support!"); }
+
+            if ((flags & MAP_HUGETLB) > 0) { neutron_abort("MAP_HUGETLB not support!"); }
+
+            if ((flags & MAP_STACK) > 0) { neutron_abort("MAP_STACK not support!"); }
+
+            map = mmap(nullptr, length, host_prot, flags, get_host_fd(fd), offset);
+
+            if (map != MAP_FAILED) {
+                ret = pcb.add_map(guest_addr, map, guest_length, guest_prot, fix);
+                if (ret == 0) {
+                    ret = -ENOMEM;
+                }
+            } else {
+                ret = -errno;
+            }
+
+            end:
+
+            if (debug) {
+                debug_stream << "system call: " << ret
+                             << " = mmap(<addr> " << addr
+                             << ", <length> " << length
+                             << ", <prot> " << prot
+                             << ", <flags> " << flags
+                             << ", <fd> " << fd
+                             << ", <offset> " << offset
+                             << ");" << std::endl;
+            }
+
+            return ret;
+        }
+
+        XLenT sys_mprotect(UXLenT addr, UXLenT len, XLenT prot) {
+            int ret = 0; // todo: not implemented
+
+            if (debug) {
+                debug_stream << "system call: " << ret
+                             << " = mprotect(<addr> " << addr
+                             << ", <len> " << len
+                             << ", <prot> " << prot
+                             << ");" << std::endl;
+            }
+
+            return ret;
         }
 
         XLenT sys_statx(int dirfd, UXLenT pathname, XLenT flags, UXLenT mask, UXLenT statxbuf) {
-            (void) dirfd;
-            (void) pathname;
-            (void) flags;
-            (void) mask;
-            (void) statxbuf;
-            return -1; // todo
+            int ret;
+            std::string name{};
+
+            struct ::statx host_buf{};
+            statx guest_buf{};
+
+            if (pcb.string_copy_from_guest(pathname, name)) {
+                auto real_name = file_name_resolve(name);
+
+                ret = ::statx(get_host_fd(dirfd), real_name.c_str(), flags, mask, &host_buf);
+
+                if (ret == 0) {
+                    guest_buf.stx_mask = host_buf.stx_mask;
+                    guest_buf.stx_blksize = host_buf.stx_blksize;
+                    guest_buf.stx_attributes = host_buf.stx_attributes;
+                    guest_buf.stx_nlink = host_buf.stx_nlink;
+                    guest_buf.stx_uid = host_buf.stx_uid;
+                    guest_buf.stx_gid = host_buf.stx_uid;
+                    guest_buf.stx_mode = host_buf.stx_uid;
+                    guest_buf.stx_ino = host_buf.stx_uid;
+                    guest_buf.stx_size = host_buf.stx_uid;
+                    guest_buf.stx_blocks = host_buf.stx_uid;
+                    guest_buf.stx_attributes_mask = host_buf.stx_uid;
+                    guest_buf.stx_atime.tv_sec = host_buf.stx_atime.tv_sec;
+                    guest_buf.stx_atime.tv_nsec = host_buf.stx_atime.tv_nsec;
+                    guest_buf.stx_btime.tv_sec = host_buf.stx_btime.tv_sec;
+                    guest_buf.stx_btime.tv_nsec = host_buf.stx_btime.tv_nsec;
+                    guest_buf.stx_ctime.tv_sec = host_buf.stx_ctime.tv_sec;
+                    guest_buf.stx_ctime.tv_nsec = host_buf.stx_ctime.tv_nsec;
+                    guest_buf.stx_mtime.tv_sec = host_buf.stx_mtime.tv_sec;
+                    guest_buf.stx_mtime.tv_nsec = host_buf.stx_mtime.tv_nsec;
+                    guest_buf.stx_rdev_major = host_buf.stx_rdev_major;
+                    guest_buf.stx_rdev_minor = host_buf.stx_rdev_minor;
+                    guest_buf.stx_dev_major = host_buf.stx_dev_major;
+                    guest_buf.stx_dev_minor = host_buf.stx_dev_minor;
+
+                    if (pcb.memory_copy_to_guest(statxbuf, &guest_buf, sizeof(guest_buf)) != sizeof(guest_buf)) {
+                        ret = -EFAULT;
+                    }
+                } else {
+                    ret = -errno;
+                }
+            } else {
+                ret = -EFAULT;
+            }
+
+            if (debug) {
+                debug_stream << "system call: " << ret
+                             << " = statx(<dirfd> " << dirfd
+                             << ", <pathname> " << name
+                             << ", <flags> " << flags
+                             << ", <mask> " << mask
+                             << ", <statxbuf> "
+                             << ");" << std::endl;
+            }
+
+            return ret;
         }
 
         bool syscall_handler() {
@@ -418,6 +684,7 @@ namespace neutron {
                     neutron_syscall(num, sub_type()->sys_##name); \
                     return true
 
+                make_syscall(2, getcwd);
                 make_syscall(4, faccessat);
                 make_syscall(4, openat);
                 make_syscall(1, close);
@@ -442,6 +709,8 @@ namespace neutron {
                 make_syscall(0, getegid);
                 make_syscall(0, gettid);
                 make_syscall(1, sysinfo);
+                make_syscall(6, mmap);
+                make_syscall(3, mprotect);
                 make_syscall(5, statx);
                 default:
                     std::cerr << "Invalid environment call number at " << std::hex << this->get_pc()
