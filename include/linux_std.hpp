@@ -1,5 +1,5 @@
-#ifndef NEUTRON_UNIX_STD_HPP
-#define NEUTRON_UNIX_STD_HPP
+#ifndef NEUTRON_LINUX_STD_HPP
+#define NEUTRON_LINUX_STD_HPP
 
 
 #define neutron_syscall_0(func) \
@@ -40,6 +40,36 @@
 
 #define neutron_syscall(num, func) \
     neutron_syscall_##num(func)
+
+
+#define NEUTRON_AT_NULL             0    /* end of vector */
+#define NEUTRON_AT_IGNORE           1    /* entry should be ignored */
+#define NEUTRON_AT_EXECFD           2    /* file descriptor of program */
+#define NEUTRON_AT_PHDR             3    /* program headers for program */
+#define NEUTRON_AT_PHENT            4    /* size of program header entry */
+#define NEUTRON_AT_PHNUM            5    /* number of program headers */
+#define NEUTRON_AT_PAGESZ           6    /* system page size */
+#define NEUTRON_AT_BASE             7    /* base address of interpreter */
+#define NEUTRON_AT_FLAGS            8    /* flags */
+#define NEUTRON_AT_ENTRY            9    /* entry point of program */
+#define NEUTRON_AT_NOTELF           10   /* program is not ELF */
+#define NEUTRON_AT_UID              11   /* real uid */
+#define NEUTRON_AT_EUID             12   /* effective uid */
+#define NEUTRON_AT_GID              13   /* real gid */
+#define NEUTRON_AT_EGID             14   /* effective gid */
+#define NEUTRON_AT_PLATFORM         15   /* string identifying CPU for optimizations */
+#define NEUTRON_AT_HWCAP            16   /* arch dependent hints at CPU capabilities */
+#define NEUTRON_AT_CLKTCK           17   /* frequency at which times() increments */
+/* AT_* values 18 through 22 are reserved */
+#define NEUTRON_AT_SECURE           23   /* secure mode boolean */
+#define NEUTRON_AT_BASE_PLATFORM    24   /* string identifying real platform,
+                                  * may differ from AT_PLATFORM. */
+#define NEUTRON_AT_RANDOM           25   /* address of 16 random bytes */
+#define NEUTRON_AT_HWCAP2           26   /* extension of AT_HWCAP */
+
+#define NEUTRON_AT_EXECFN           31   /* filename of program */
+#define NEUTRON_AT_SYSINFO          32
+#define NEUTRON_AT_SYSINFO_EHDR     33
 
 
 #define __ARCH_WANT_NEW_STAT
@@ -424,6 +454,22 @@ namespace neutron {
         };
     }
 
+
+#define NEUTRON_MAP_GROWSDOWN       0x00100     /* Stack-like segment. */
+#define NEUTRON_MAP_DENYWRITE       0x00800     /* ETXTBSY. */
+#define NEUTRON_MAP_EXECUTABLE      0x01000     /* Mark it as an executable. */
+#define NEUTRON_MAP_LOCKED          0x02000     /* Lock the mapping. */
+#define NEUTRON_MAP_NORESERVE       0x04000     /* Don't check for reservations. */
+#define NEUTRON_MAP_POPULATE        0x08000     /* Populate (prefault) pagetables. */
+#define NEUTRON_MAP_NONBLOCK        0x10000     /* Do not block on IO. */
+#define NEUTRON_MAP_STACK           0x20000     /* Allocation is for a stack. */
+#define NEUTRON_MAP_HUGETLB         0x40000     /* Create huge page mapping. */
+#define NEUTRON_MAP_SYNC            0x80000     /* Perform synchronous page faults for the mapping. */
+#define NEUTRON_MAP_FIXED_NOREPLACE 0x100000    /* MAP_FIXED but do not unmap */
+
+#define NEUTRON_AT_EMPTY_PATH       0x1000      /* Allow empty relative pathname. */
+
+
     struct utsname {
         static constexpr usize UTSNAME_LENGTH = 65;
 
@@ -489,7 +535,38 @@ namespace neutron {
         u32 stx_dev_minor;
         u64 __statx_pad2[14];
     };
+
+#define FUTEX_WAIT		                0
+#define FUTEX_WAKE		                1
+#define FUTEX_FD		                2
+#define FUTEX_REQUEUE		            3
+#define FUTEX_CMP_REQUEUE	            4
+#define FUTEX_WAKE_OP		            5
+#define FUTEX_LOCK_PI		            6
+#define FUTEX_UNLOCK_PI		            7
+#define FUTEX_TRYLOCK_PI	            8
+#define FUTEX_WAIT_BITSET	            9
+#define FUTEX_WAKE_BITSET	            10
+#define FUTEX_WAIT_REQUEUE_PI	        11
+#define FUTEX_CMP_REQUEUE_PI	        12
+
+#define FUTEX_PRIVATE_FLAG	            128
+#define FUTEX_CLOCK_REALTIME	        256
+#define FUTEX_CMD_MASK		            ~(FUTEX_PRIVATE_FLAG | FUTEX_CLOCK_REALTIME)
+
+#define FUTEX_WAIT_PRIVATE	            (FUTEX_WAIT | FUTEX_PRIVATE_FLAG)
+#define FUTEX_WAKE_PRIVATE	            (FUTEX_WAKE | FUTEX_PRIVATE_FLAG)
+#define FUTEX_REQUEUE_PRIVATE	        (FUTEX_REQUEUE | FUTEX_PRIVATE_FLAG)
+#define FUTEX_CMP_REQUEUE_PRIVATE       (FUTEX_CMP_REQUEUE | FUTEX_PRIVATE_FLAG)
+#define FUTEX_WAKE_OP_PRIVATE	        (FUTEX_WAKE_OP | FUTEX_PRIVATE_FLAG)
+#define FUTEX_LOCK_PI_PRIVATE	        (FUTEX_LOCK_PI | FUTEX_PRIVATE_FLAG)
+#define FUTEX_UNLOCK_PI_PRIVATE	        (FUTEX_UNLOCK_PI | FUTEX_PRIVATE_FLAG)
+#define FUTEX_TRYLOCK_PI_PRIVATE        (FUTEX_TRYLOCK_PI | FUTEX_PRIVATE_FLAG)
+#define FUTEX_WAIT_BITSET_PRIVATE	    (FUTEX_WAIT_BITSET | FUTEX_PRIVATE_FLAG)
+#define FUTEX_WAKE_BITSET_PRIVATE	    (FUTEX_WAKE_BITSET | FUTEX_PRIVATE_FLAG)
+#define FUTEX_WAIT_REQUEUE_PI_PRIVATE	(FUTEX_WAIT_REQUEUE_PI | FUTEX_PRIVATE_FLAG)
+#define FUTEX_CMP_REQUEUE_PI_PRIVATE	(FUTEX_CMP_REQUEUE_PI | FUTEX_PRIVATE_FLAG)
 }
 
 
-#endif //NEUTRON_UNIX_STD_HPP
+#endif //NEUTRON_LINUX_STD_HPP

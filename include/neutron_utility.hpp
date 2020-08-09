@@ -95,7 +95,7 @@ namespace neutron {
     template<typename T, usize begin, isize offset = 0>
     constexpr inline T get_bit(T val) { return get_bits<T, begin + 1, begin, offset>(val); }
 
-    template <typename T>
+    template<typename T>
     T divide_ceil(T a, T b) {
         static_assert(std::is_unsigned<T>::value, "this function is only for unsigned!");
 

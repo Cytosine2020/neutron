@@ -13,10 +13,16 @@ add_executable(neutron-riscv-linux src/neutron_riscv_linux.cpp)
 target_compile_definitions(neutron-riscv-linux PRIVATE
         __RV_BASE_I__ __RV_BIT_WIDTH__=32
         __RV_SUPERVISOR_MODE__ __RV_USER_MODE__
-        __RV_EXTENSION_M__ __RV_EXTENSION_ZICSR__)
+        __RV_EXTENSION_M__ __RV_EXTENSION_A__ __RV_EXTENSION_ZICSR__)
 
 add_executable(neutron-riscv-linux-fuzzer src/neutron_riscv_linux_fuzzer.cpp)
 target_compile_definitions(neutron-riscv-linux-fuzzer PRIVATE
         __RV_BASE_I__ __RV_BIT_WIDTH__=32
         __RV_SUPERVISOR_MODE__ __RV_USER_MODE__
-        __RV_EXTENSION_M__ __RV_EXTENSION_ZICSR__)
+        __RV_EXTENSION_M__ __RV_EXTENSION_A__ __RV_EXTENSION_ZICSR__)
+
+add_executable(neutron-riscv-linux-gdb src/neutron_riscv_linux_gdb.cpp)
+target_compile_definitions(neutron-riscv-linux-gdb PRIVATE
+        __RV_BASE_I__ __RV_BIT_WIDTH__=32
+        __RV_SUPERVISOR_MODE__ __RV_USER_MODE__
+        __RV_EXTENSION_M__ __RV_EXTENSION_A__ __RV_EXTENSION_ZICSR__)

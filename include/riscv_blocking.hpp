@@ -2,6 +2,7 @@
 #define NEUTRON_RISCV_BLOCKING_HPP
 
 
+#include <cstring>
 #include <map>
 
 #include "instruction/instruction_visitor.hpp"
@@ -60,7 +61,7 @@ namespace neutron {
             inst_buffer = 0;
 
             if (length < 2) return illegal_instruction(reinterpret_cast<riscv_isa::Instruction *>(&this->inst_buffer));
-            *(reinterpret_cast<u16 *>(&inst_buffer) + 0) = *(reinterpret_cast<u16 *>(inst) + 0);
+            memcpy(reinterpret_cast<u8 *>(&inst_buffer) + 0, reinterpret_cast<u8 *>(inst) + 0, 2);
 
             if ((this->inst_buffer & bits_mask<u16, 2, 0>::val) != bits_mask<u16, 2, 0>::val) {
 #if defined(__RV_EXTENSION_C__)
@@ -71,7 +72,7 @@ namespace neutron {
             } else if ((this->inst_buffer & bits_mask<u16, 5, 2>::val) != bits_mask<u16, 5, 2>::val) {
                 if (length < 4)
                     return illegal_instruction(reinterpret_cast<riscv_isa::Instruction *>(&this->inst_buffer));
-                *(reinterpret_cast<u16 *>(&inst_buffer) + 1) = *(reinterpret_cast<u16 *>(inst) + 1);
+                memcpy(reinterpret_cast<u8 *>(&inst_buffer) + 2, reinterpret_cast<u8 *>(inst) + 2, 2);
                 return this->visit_32(reinterpret_cast<riscv_isa::Instruction32 *>(&this->inst_buffer));
             } else {
                 return illegal_instruction(reinterpret_cast<riscv_isa::Instruction *>(&this->inst_buffer));
