@@ -105,6 +105,7 @@ namespace neutron {
                                 .ancestor = 0,
                                 .semi = predecessor,
                                 .idom = predecessor});
+
                         stack.emplace_back(back.first, back.second);
 
                         VertexPtr current_ptr = graph.find_vertex(current_vertex);
@@ -197,7 +198,7 @@ namespace neutron {
     };
 
     template<typename VertexT>
-    using PosDominatorTree = DominatorTree<VertexT, false>;
+    using PosDominatorTree = DominatorTree<VertexT, true>;
 }
 
 

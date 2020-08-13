@@ -1,10 +1,8 @@
-#include <fcntl.h>
 #include "neutron_utility.hpp"
 #include "riscv_linux.hpp"
 
 using namespace neutron;
 
-extern char **environ;
 
 class Core : public LinuxHart<Core> {
 public:

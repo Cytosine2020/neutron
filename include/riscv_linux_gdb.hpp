@@ -2,13 +2,10 @@
 #define NEUTRON_RISCV_LINUX_GDB_HPP
 
 
-#include <sstream>
-#include <cstdio>
-
 #include "riscv_isa_utility.hpp"
 
 #include "riscv_linux.hpp"
-#include "neutron_riscv_linux_gdb.hpp"
+#include "gdb_server.hpp"
 
 
 namespace neutron {
@@ -30,8 +27,8 @@ namespace neutron {
         using IntRegT = typename LinuxHart<SubT, xlen>::IntRegT;
         using CSRRegT = typename LinuxHart<SubT, xlen>::CSRRegT;
 
-        LinuxGDBHart(UXLenT hart_id, LinuxProgram<xlen> &mem, u32 port) :
-                LinuxHart<SubT, xlen>{hart_id, mem}, gdb{port} {}
+        LinuxGDBHart(UXLenT hart_id, LinuxProgram<xlen> &mem) :
+                LinuxHart<SubT, xlen>{hart_id, mem}, gdb{true} {}
 
         bool gdb_handler() {
             while (true) {
@@ -98,11 +95,11 @@ namespace neutron {
                             if (!gdb.send_reply("OK")) return false;
                         } else if (message.begin_with("Offsets")) {
                             if (!gdb.push_reply("Text=") ||
-                                !gdb.push_hex(this->pcb.elf_offset) ||
+                                !gdb.push_hex(this->pcb.elf_shift) ||
                                 !gdb.push_reply(";Data=") ||
-                                !gdb.push_hex(this->pcb.elf_offset) ||
+                                !gdb.push_hex(this->pcb.elf_shift) ||
                                 !gdb.push_reply(";Bss=") ||
-                                !gdb.push_hex(this->pcb.elf_offset) ||
+                                !gdb.push_hex(this->pcb.elf_shift) ||
                                 !gdb.send())
                                 return false;
                         } else if (message.begin_with("Supported")) {
@@ -130,26 +127,28 @@ namespace neutron {
             }
         }
 
-        XLenT sys_writev(int fd, UXLenT iov, UXLenT iovcnt) {
-            gdb.send_reply("S05") && gdb_handler();
-            return super()->sys_writev(fd, iov, iovcnt);
+        bool gdb_talk() {
+            return gdb.get_fd() == -1 || (gdb.send_reply("S05") && gdb_handler());
         }
 
-        XLenT sys_write(int fd, UXLenT addr, UXLenT size) {
-            gdb.send_reply("S05") && gdb_handler();
-            return super()->sys_write(fd, addr, size);
-        }
+//        XLenT sys_writev(int fd, UXLenT iov, UXLenT iovcnt) {
+//            gdb_talk();
+//            return super()->sys_writev(fd, iov, iovcnt);
+//        }
+//
+//        XLenT sys_write(int fd, UXLenT addr, UXLenT size) {
+//            gdb_talk();
+//            return super()->sys_write(fd, addr, size);
+//        }
 
-        bool break_point_handler(neutron_unused UXLenT addr) { return gdb.send_reply("S05") && gdb_handler(); }
+        bool break_point_handler(neutron_unused UXLenT addr) { return gdb_talk(); }
 
-        void start() {
-            if (gdb.get_fd() == -1) { return; }
-
-            if (!gdb_handler()) { return; }
+        void start(u32 port) {
+            if (!this->goto_main() || !gdb.gdb_connect(port) || !gdb_handler()) { return; }
 
             while (sub_type()->visit() || sub_type()->trap_handler()) {}
 
-            gdb.send_reply("S05") && gdb_handler();
+            gdb_talk();
         }
     };
 }

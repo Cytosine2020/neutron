@@ -2,6 +2,8 @@
 #define NEUTRON_RISCV_LINUX_FUZZER_HPP
 
 
+#include <cerrno>
+
 #include <iostream>
 #include <vector>
 
@@ -83,9 +85,12 @@ namespace neutron {
         u8 get_jalr_rs1() { return inner.jalr.rs1; }
     };
 
-    class LinuxFuzzerHart : public LinuxHart<LinuxFuzzerHart> {
+    class LinuxCore : public LinuxHart<LinuxCore> {
+    };
+
+    class LinuxFuzzerCore : public LinuxHart<LinuxFuzzerCore> {
     private:
-        using SuperT = LinuxHart<LinuxFuzzerHart>;
+        using SuperT = LinuxHart<LinuxFuzzerCore>;
 
         SuperT *super() { return this; }
 
@@ -95,8 +100,8 @@ namespace neutron {
         usize input_offset;
 
     public:
-        LinuxFuzzerHart(UXLenT hart_id, LinuxProgram<> &mem, std::vector<u8> &input) :
-                LinuxHart<LinuxFuzzerHart>{hart_id, mem}, record{}, input{input}, input_offset{0} {}
+        LinuxFuzzerCore(UXLenT hart_id, LinuxProgram<> &mem, std::vector<u8> &input) :
+                LinuxHart<LinuxFuzzerCore>{hart_id, mem}, record{}, input{input}, input_offset{0} {}
 
         RetT visit_jal_inst(riscv_isa::JALInst *inst) {
             record.emplace_back(BranchRecord::jal(get_pc(), inst->get_rd()));
@@ -168,17 +173,18 @@ namespace neutron {
             return super()->visit_bgeu_inst(inst);
         }
 
-        XLenT sys_lseek(XLenT fd, XLenT offset, XLenT whence) {
+        XLenT sys_lseek(int fd, UXLenT offset_hi, UXLenT offset_lo, UXLenT result, XLenT whence) {
             if (fd == 0) {
-                i32 new_input_offset;
+                i64 offset = (static_cast<u64>(offset_hi) << 32u) + offset_lo;
+                i32 ret;
 
                 switch (whence) {
                     case SEEK_SET:
-                        new_input_offset = offset;
+                        ret = offset;
                         break;
                     case SEEK_CUR:
                         if (input_offset > static_cast<usize>(INT32_MAX - offset)) return -EOVERFLOW;
-                        new_input_offset = input_offset + offset;
+                        ret = input_offset + offset;
                         break;
                     case SEEK_END:
                         neutron_abort("seek end not implemented!");
@@ -190,56 +196,72 @@ namespace neutron {
                         neutron_abort("unknown seek type!");
                 }
 
-                if (new_input_offset < 0) return -EINVAL;
+                if (ret >= 0) {
+                    for (int i = input.size(); i < ret; ++i)
+                        input.emplace_back(rand());
 
-                for (int i = input.size(); i < new_input_offset; ++i)
-                    input.emplace_back(rand());
+                    input_offset = ret;
+                } else {
+                    ret = -EINVAL;
+                }
 
-                input_offset = new_input_offset;
-                return input_offset;
+//                std::cout << "system call: " << ret
+//                          << " = lseek(<fd> " << fd
+//                          << ", <offset> " << offset
+//                          << ", <whence> " << whence
+//                          << ");" << std::endl;
+
+                return ret;
             } else {
-                return lseek(fd, offset, whence);
+                return super()->sys_lseek(fd, offset_hi, offset_lo, result, whence);
             }
         }
 
-        XLenT sys_read(XLenT fd, UXLenT addr, XLenT size) {
-            if (input_offset > static_cast<usize>(INT32_MAX - size)) return -EOVERFLOW;
-
-            char *buffer = new char[size];
-
-            XLenT result;
+        XLenT sys_read(XLenT fd, UXLenT addr, UXLenT size) {
             if (fd == 0) {
-                i32 i = 0, j = input_offset;
+                if (input_offset > static_cast<usize>(INT32_MAX - size)) return -EOVERFLOW;
 
-                for (; i < size && static_cast<u64>(j) < input.size(); ++i, ++j) {
-                    buffer[i] = input[j];
-                }
+                XLenT ret;
+                std::vector<::iovec> io_vec{};
 
-                for (; i < size; ++i) {
-                    buffer[i] = rand();
-                    input.emplace_back(buffer[i]);
+                if (pcb.memory_get_vector(addr, size, riscv_isa::W_BIT, io_vec)) {
+                    for (usize k = input.size(); k < input_offset + size; ++k) {
+                        input.emplace_back(rand());
+                    }
+
+                    u64 j = input_offset;
+                    for (auto &item: io_vec) {
+                        memcpy(item.iov_base, input.data() + j, item.iov_len);
+                        j += item.iov_len;
+                    }
+                } else {
+                    ret = -EFAULT;
                 }
 
                 input_offset += size;
+                ret = size;
 
-                result = size;
+//                char content[11]{};
+//                UXLenT read_size = std::min(10u, size);
+//
+//                if (pcb.memory_copy_from_guest(content, addr, read_size) != read_size) {
+//                    neutron_unreachable("");
+//                }
+//
+//                std::cout << "system call: " << ret
+//                          << " = read(<fd> " << fd
+//                          << ", <addr> \"" << content
+//                          << "\", <size> " << size
+//                          << ");" << std::endl;
+
+                return ret;
             } else {
-                result = read(fd, buffer, size);
+                return super()->sys_read(fd, addr, size);
             }
-
-            for (i32 i = 0; i < size; ++i) {
-                char *byte = pcb.address_write<char>(addr + i); // todo: optimize
-                if (byte == nullptr) return 0;
-                else *byte = buffer[i];
-            }
-
-            delete[] buffer;
-
-            return result;
         }
 
         std::vector<BranchRecord> start() {
-            super()->start();
+            if (reinterpret_cast<LinuxCore *>(this)->goto_main()) { super()->start(); }
 
             return record;
         }

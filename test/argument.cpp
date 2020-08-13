@@ -21,32 +21,31 @@ int main(int argc, char **argv) {
         std::cout << reinterpret_cast<void *>(environ[i]) << ": " << envp[i] << std::endl;
     }
 
-#define getauxval(type) \
-    std::cout << #type ": " << getauxval(type) << std::endl;
-
-    getauxval(AT_IGNORE);
-    getauxval(AT_EXECFD);
-    getauxval(AT_PHDR);
-    getauxval(AT_PHENT);
-    getauxval(AT_PHNUM);
-    getauxval(AT_PAGESZ);
-    getauxval(AT_BASE);
-    getauxval(AT_FLAGS);
-    getauxval(AT_ENTRY);
-    getauxval(AT_NOTELF);
-    getauxval(AT_UID);
-    getauxval(AT_EUID);
-    getauxval(AT_GID);
-    getauxval(AT_EGID);
-    getauxval(AT_PLATFORM);
-    getauxval(AT_HWCAP);
-    getauxval(AT_CLKTCK);
-    getauxval(AT_SECURE);
-    getauxval(AT_BASE_PLATFORM);
-    getauxval(AT_RANDOM);
-    getauxval(AT_PHNUM);
-    getauxval(AT_HWCAP2);
-    getauxval(AT_EXECFN);
-    getauxval(AT_SYSINFO);
-    getauxval(AT_SYSINFO_EHDR);
+    std::cout << "AT_IGNORE: " << getauxval(AT_IGNORE) << std::endl;
+    std::cout << "AT_EXECFD: " << getauxval(AT_EXECFD) << std::endl;
+    std::cout << "AT_PHDR: " << getauxval(AT_PHDR) << std::endl;
+    std::cout << "AT_PHENT: " << getauxval(AT_PHENT) << std::endl;
+    std::cout << "AT_PHNUM: " << getauxval(AT_PHNUM) << std::endl;
+    std::cout << "AT_PAGESZ: " << getauxval(AT_PAGESZ) << std::endl;
+    std::cout << "AT_BASE: " << getauxval(AT_BASE) << std::endl;
+    std::cout << "AT_FLAGS: " << getauxval(AT_FLAGS) << std::endl;
+    std::cout << "AT_ENTRY: " << getauxval(AT_ENTRY) << std::endl;
+    std::cout << "AT_NOTELF: " << getauxval(AT_NOTELF) << std::endl;
+    std::cout << "AT_UID: " << getauxval(AT_UID) << std::endl;
+    std::cout << "AT_EUID: " << getauxval(AT_EUID) << std::endl;
+    std::cout << "AT_GID: " << getauxval(AT_GID) << std::endl;
+    std::cout << "AT_EGID: " << getauxval(AT_EGID) << std::endl;
+    std::cout << "AT_PLATFORM: " << reinterpret_cast<const char *>(getauxval(AT_PLATFORM)) << std::endl;
+    std::cout << "AT_HWCAP: " << getauxval(AT_HWCAP) << std::endl;
+    std::cout << "AT_CLKTCK: " << getauxval(AT_CLKTCK) << std::endl;
+    std::cout << "AT_SECURE: " << getauxval(AT_SECURE) << std::endl;
+    std::cout << "AT_BASE_PLATFORM: " << getauxval(AT_BASE_PLATFORM) << std::endl;
+    std::cout << "AT_RANDOM: " << getauxval(AT_RANDOM) << std::endl;
+    std::cout << "AT_HWCAP2: " << getauxval(AT_HWCAP2) << std::endl;
+    std::cout << "AT_EXECFN: " << reinterpret_cast<const char *>(getauxval(AT_EXECFN)) << std::endl;
+    std::cout << "AT_SYSINFO: " << getauxval(AT_SYSINFO) << std::endl;
+    std::cout << "AT_SYSINFO_EHDR: " << getauxval(AT_SYSINFO_EHDR) << std::endl;
+    std::cout << "AT_UCACHEBSIZE: " << getauxval(AT_UCACHEBSIZE) << std::endl;
+    std::cout << "AT_ICACHEBSIZE: " << getauxval(AT_ICACHEBSIZE) << std::endl;
+    std::cout << "AT_FPUCW: " << getauxval(AT_FPUCW) << std::endl;
 }

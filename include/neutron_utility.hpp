@@ -8,13 +8,22 @@
 
 
 namespace neutron {
-    void _warn(const char *file, int line, const char *msg) {
+#define neutron_static_inline static inline __attribute__((always_inline))
+#define neutron_unused __attribute__((unused))
+#define neutron_no_return __attribute__((noreturn))
+#if defined(__DEBUG__)
+#define neutron_inline
+#else
+#define neutron_inline inline __attribute__((__always_inline__))
+#endif
+
+    neutron_static_inline void _warn(const char *file, int line, const char *msg) {
         std::cerr << "Warn at file " << file << ", line " << line << ": " << msg << std::endl;
     }
 
 #define neutron_warn(msg) neutron::_warn(__FILE__, __LINE__, msg)
 
-    __attribute__((noreturn)) void _abort(const char *file, int line, const char *msg) {
+    neutron_static_inline neutron_no_return void _abort(const char *file, int line, const char *msg) {
         std::cerr << "Abort at file " << file << ", line " << line << ": " << msg << std::endl;
 
         abort();
@@ -22,7 +31,7 @@ namespace neutron {
 
 #define neutron_abort(msg) neutron::_abort(__FILE__, __LINE__, msg)
 
-    __attribute__((noreturn)) void _unreachable(const char *file, int line, const char *msg) {
+    neutron_static_inline neutron_no_return void _unreachable(const char *file, int line, const char *msg) {
         std::cerr << "Unreachable at file " << file << ", line " << line << ": " << msg << std::endl;
 
         abort();
@@ -30,7 +39,6 @@ namespace neutron {
 
 #define neutron_unreachable(msg) neutron::_unreachable(__FILE__, __LINE__, msg)
 
-#define neutron_unused __attribute__((unused))
 
     using i8 = int8_t;
     using u8 = u_int8_t;
@@ -101,6 +109,61 @@ namespace neutron {
 
         return a == 0 ? 0 : (a - 1) / b + 1;
     }
+
+    template<typename T>
+    class Array {
+    private:
+        T *inner;
+        usize size_;
+
+    public:
+        Array() : inner{nullptr}, size_{0} {}
+
+        explicit Array(usize size) :
+                inner{new T[size]{}}, size_{size} {}
+
+        Array(Array &&other) noexcept:
+                inner{other.inner}, size_{other.size_} {
+            other.inner = nullptr;
+        }
+
+        Array &operator=(Array &&other) noexcept {
+            if (this != &other) {
+                delete[] this->inner;
+                this->inner = other.inner;
+                this->size_ = other.size_;
+                other.inner = nullptr;
+            }
+
+            return *this;
+        }
+
+        T &operator[](usize index) {
+            if (index >= size_) { neutron_abort("index out of boundary!"); }
+
+            return inner[index];
+        }
+
+        const T &operator[](usize index) const {
+            if (index >= size_) { neutron_abort("index out of boundary!"); }
+
+            return inner[index];
+        }
+
+        usize size() const { return size_; }
+
+        bool empty() const { return size() == 0; }
+
+        T *begin() { return inner; }
+
+        T *end() { return inner + size_; }
+
+        const T *begin() const { return inner; }
+
+        const T *end() const { return inner + size_; }
+
+        ~Array() { delete[] inner; }
+    };
 }
 
 
