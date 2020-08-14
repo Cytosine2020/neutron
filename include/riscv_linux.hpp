@@ -13,6 +13,7 @@
 #include <sys/sysinfo.h>
 #include <sys/utsname.h>
 #include <sys/syscall.h>
+#include <sys/times.h>
 #include <sys/resource.h>
 
 #include <iostream>
@@ -30,8 +31,6 @@ namespace neutron {
     template<typename SubT, typename xlen = typename riscv_isa::xlen_trait>
     class LinuxHart : public riscv_isa::Hart<SubT> {
     private:
-        using iovec = typename LinuxProgram<xlen>::iovec;
-
         SubT *sub_type() { return static_cast<SubT *>(this); }
 
     protected:
@@ -48,10 +47,14 @@ namespace neutron {
         using IntRegT = typename riscv_isa::Hart<SubT>::IntRegT;
         using CSRRegT = typename riscv_isa::Hart<SubT>::CSRRegT;
 
-        LinuxHart(UXLenT hart_id, LinuxProgram<xlen> &mem) :
+        LinuxHart(UXLenT hart_id, LinuxProgram<xlen> &mem,
+                  bool debug = false, std::ostream &debug_stream = std::cerr) :
                 riscv_isa::Hart<SubT>{hart_id, mem.pc, mem.int_reg}, pcb{mem},
-                riscv_sysroot{getenv("RISCV_SYSROOT")}, debug_stream{std::cerr}, debug{false} {
+                riscv_sysroot{getenv("RISCV_SYSROOT")}, debug_stream{debug_stream}, debug{debug} {
             this->cur_level = riscv_isa::USER_MODE;
+
+            pcb.debug = debug;
+
             pcb.fd_map.emplace(0, dup(0));
             pcb.fd_map.emplace(1, dup(1));
             pcb.fd_map.emplace(2, dup(2));
@@ -327,6 +330,34 @@ namespace neutron {
             return ret;
         }
 
+        XLenT sys_pipe2(UXLenT pipefd, XLenT flags) {
+            XLenT ret;
+
+            int host_pipefd[2]{-1, -1};
+
+            ret = pipe2(host_pipefd, flags);
+
+            if (ret == -1) {
+                ret = -errno;
+            } else {
+                host_pipefd[0] = get_guest_fd(host_pipefd[0]);
+                host_pipefd[1] = get_guest_fd(host_pipefd[1]);
+
+                if (pcb.memory_copy_to_guest(pipefd, &host_pipefd, sizeof(host_pipefd)) != sizeof(host_pipefd)) {
+                    ret = -EFAULT;
+                }
+            }
+
+            if (debug) {
+                debug_stream << "system call: " << ret
+                             << " = close(<pipefd> [" << host_pipefd[0] << ", " << host_pipefd[1]
+                             << ", <flags>" << flags
+                             << ");" << std::endl;
+            }
+
+            return ret;
+        }
+
         // todo: this is different from 32 and 64
         XLenT sys_lseek(int fd, UXLenT offset_hi, UXLenT offset_lo, UXLenT result, XLenT whence) {
             i64 offset = (static_cast<u64>(offset_hi) << 32u) + offset_lo;
@@ -550,12 +581,12 @@ namespace neutron {
         }
 
         RetT sys_exit(XLenT status) {
-            std::cout << std::endl << "[exit " << status << ']' << std::endl;
+            pcb.exit_value = status;
             return false;
         }
 
         RetT sys_exit_group(XLenT status) {
-            std::cout << std::endl << "[exit " << status << ']' << std::endl;
+            pcb.exit_value = status; // todo: exit group
             return false;
         }
 
@@ -614,6 +645,36 @@ namespace neutron {
             return ret;
         }
 
+        XLenT sys_times(UXLenT buf) {
+            XLenT ret;
+
+            struct ::tms host_buf{};
+            tms guest_buf{};
+
+            ret = times(&host_buf);
+
+            if (ret != -1) {
+                guest_buf.utime = host_buf.tms_utime;
+                guest_buf.stime = host_buf.tms_stime;
+                guest_buf.cutime = host_buf.tms_cutime;
+                guest_buf.cstime = host_buf.tms_cstime;
+
+                if (pcb.memory_copy_to_guest(buf, &guest_buf, sizeof(guest_buf)) != sizeof(guest_buf)) {
+                    ret = -EFAULT;
+                }
+            } else {
+                ret = -errno;
+            }
+
+            if (debug) {
+                debug_stream << "system call: "
+                             << " = times(" << buf
+                             << ");" << std::endl;
+            }
+
+            return ret;
+        }
+
         XLenT sys_uname(UXLenT buf) {
             (void) buf;
 
@@ -649,31 +710,6 @@ namespace neutron {
                              << "\", <version> \"" << guest_buf.version
                              << "\", <machine> \"" << guest_buf.machine
                              << "\"})" << std::endl;
-            }
-
-            return ret;
-        }
-
-        XLenT sys_brk(UXLenT addr) {
-            XLenT ret = pcb.set_brk(addr);
-
-            if (debug) {
-                debug_stream << "system call: " << ret
-                             << " = brk(<addr> " << addr
-                             << ");" << std::endl;
-            }
-
-            return ret;
-        }
-
-        XLenT sys_munmap(UXLenT addr, XLenT length) {
-            XLenT ret = pcb.memory_unmap(addr, length);
-
-            if (debug) {
-                debug_stream << "system call: " << ret
-                             << " = brk(<addr> " << addr
-                             << " = brk(<length> " << length
-                             << ");" << std::endl;
             }
 
             return ret;
@@ -731,24 +767,65 @@ namespace neutron {
             XLenT ret;
 
             struct ::sysinfo host_info{};
+            sysinfo guest_info{};
 
             ret = ::sysinfo(&host_info);
 
             if (ret == -1) {
                 ret = -errno;
             } else {
-                if (pcb.memory_copy_to_guest(info, &host_info, sizeof(host_info)) != sizeof(host_info)) {
+                guest_info.uptime = host_info.uptime;
+                guest_info.loads[0] = host_info.loads[0];
+                guest_info.loads[1] = host_info.loads[1];
+                guest_info.loads[2] = host_info.loads[2];
+                guest_info.totalram = host_info.totalram;
+                guest_info.freeram = host_info.freeram;
+                guest_info.sharedram = host_info.sharedram;
+                guest_info.bufferram = host_info.bufferram;
+                guest_info.totalswap = host_info.totalswap;
+                guest_info.freeswap = host_info.freeswap;
+                guest_info.procs = host_info.procs;
+                guest_info.totalhigh = host_info.totalhigh;
+                guest_info.freehigh = host_info.freehigh;
+                guest_info.mem_unit = host_info.mem_unit;
+
+                if (pcb.memory_copy_to_guest(info, &guest_info, sizeof(guest_info)) != sizeof(guest_info)) {
                     ret = -EFAULT;
                 }
             }
 
             if (debug) {
                 debug_stream << "system call: "
-                             << " = sysinfo("
+                             << " = sysinfo(" << info
                              << ");" << std::endl;
             }
 
-            return -1;
+            return ret;
+        }
+
+        XLenT sys_brk(UXLenT addr) {
+            XLenT ret = pcb.set_break(addr);
+
+            if (debug) {
+                debug_stream << "system call: " << ret
+                             << " = brk(<addr> " << addr
+                             << ");" << std::endl;
+            }
+
+            return ret;
+        }
+
+        XLenT sys_munmap(UXLenT addr, XLenT length) {
+            XLenT ret = pcb.memory_unmap(addr, length);
+
+            if (debug) {
+                debug_stream << "system call: " << ret
+                             << " = brk(<addr> " << addr
+                             << " = brk(<length> " << length
+                             << ");" << std::endl;
+            }
+
+            return ret;
         }
 
         XLenT sys_mmap(UXLenT addr, UXLenT length, XLenT prot, XLenT flags, XLenT fd, UXLenT offset) {
@@ -783,7 +860,7 @@ namespace neutron {
         }
 
         XLenT sys_prlimit64(XLenT pid, XLenT resource, UXLenT new_limit, UXLenT old_limit) {
-            XLenT ret = -1;
+            XLenT ret;
 
             struct rlimit host_old_limit{};
 
@@ -819,7 +896,6 @@ namespace neutron {
                              << ", <new_limit> " << new_limit
                              << ", <old_limit> " << old_limit
                              << ");" << std::endl;
-//                pcb.dump_map(debug_stream);
             }
 
             return ret;
@@ -884,29 +960,29 @@ namespace neutron {
                     guest_buf.stx_dev_major = host_buf.stx_dev_major;
                     guest_buf.stx_dev_minor = host_buf.stx_dev_minor;
 #elif defined(__APPLE__)
-//                    guest_buf.stx_mask = host_buf.stx_mask;
-                    guest_buf.stx_blksize = host_buf.st_blksize;
-//                    guest_buf.stx_attributes = host_buf.stx_attributes;
-                    guest_buf.stx_nlink = host_buf.st_nlink;
-                    guest_buf.stx_uid = host_buf.st_uid;
-                    guest_buf.stx_gid = host_buf.st_gid;
-                    guest_buf.stx_mode = host_buf.st_mode;
-                    guest_buf.stx_ino = host_buf.st_ino;
-                    guest_buf.stx_size = host_buf.st_size;
-                    guest_buf.stx_blocks = host_buf.st_blocks;
-//                    guest_buf.stx_attributes_mask = host_buf.stx_attributes_mask;
-                    guest_buf.stx_atime.tv_sec = host_buf.st_atimespec.tv_sec;
-                    guest_buf.stx_atime.tv_nsec = host_buf.st_atimespec.tv_nsec;
-//                    guest_buf.stx_btime.tv_sec = host_buf.st_btime.tv_sec;
-//                    guest_buf.stx_btime.tv_nsec = host_buf.st_btime.tv_nsec;
-                    guest_buf.stx_ctime.tv_sec = host_buf.st_ctimespec.tv_sec;
-                    guest_buf.stx_ctime.tv_nsec = host_buf.st_ctimespec.tv_nsec;
-                    guest_buf.stx_mtime.tv_sec = host_buf.st_mtimespec.tv_sec;
-                    guest_buf.stx_mtime.tv_nsec = host_buf.st_mtimespec.tv_nsec;
-//                    guest_buf.stx_rdev_major = host_buf.st_rdev_major;
-//                    guest_buf.stx_rdev_minor = host_buf.st_rdev_minor;
-//                    guest_buf.stx_dev_major = host_buf.st_dev_major;
-//                    guest_buf.stx_dev_minor = host_buf.st_dev_minor;
+                    //                    guest_buf.stx_mask = host_buf.stx_mask;
+                                        guest_buf.stx_blksize = host_buf.st_blksize;
+                    //                    guest_buf.stx_attributes = host_buf.stx_attributes;
+                                        guest_buf.stx_nlink = host_buf.st_nlink;
+                                        guest_buf.stx_uid = host_buf.st_uid;
+                                        guest_buf.stx_gid = host_buf.st_gid;
+                                        guest_buf.stx_mode = host_buf.st_mode;
+                                        guest_buf.stx_ino = host_buf.st_ino;
+                                        guest_buf.stx_size = host_buf.st_size;
+                                        guest_buf.stx_blocks = host_buf.st_blocks;
+                    //                    guest_buf.stx_attributes_mask = host_buf.stx_attributes_mask;
+                                        guest_buf.stx_atime.tv_sec = host_buf.st_atimespec.tv_sec;
+                                        guest_buf.stx_atime.tv_nsec = host_buf.st_atimespec.tv_nsec;
+                    //                    guest_buf.stx_btime.tv_sec = host_buf.st_btime.tv_sec;
+                    //                    guest_buf.stx_btime.tv_nsec = host_buf.st_btime.tv_nsec;
+                                        guest_buf.stx_ctime.tv_sec = host_buf.st_ctimespec.tv_sec;
+                                        guest_buf.stx_ctime.tv_nsec = host_buf.st_ctimespec.tv_nsec;
+                                        guest_buf.stx_mtime.tv_sec = host_buf.st_mtimespec.tv_sec;
+                                        guest_buf.stx_mtime.tv_nsec = host_buf.st_mtimespec.tv_nsec;
+                    //                    guest_buf.stx_rdev_major = host_buf.st_rdev_major;
+                    //                    guest_buf.stx_rdev_minor = host_buf.st_rdev_minor;
+                    //                    guest_buf.stx_dev_major = host_buf.st_dev_major;
+                    //                    guest_buf.stx_dev_minor = host_buf.st_dev_minor;
 #endif
 
                     if (pcb.memory_copy_to_guest(statxbuf, &guest_buf, sizeof(guest_buf)) != sizeof(guest_buf)) {
@@ -947,6 +1023,7 @@ namespace neutron {
                 make_syscall(3, faccessat);
                 make_syscall(4, openat);
                 make_syscall(1, close);
+                make_syscall(2, pipe2);
                 make_syscall(5, lseek);
                 make_syscall(3, read);
                 make_syscall(3, write);
@@ -960,22 +1037,23 @@ namespace neutron {
                     return sub_type()->sys_exit_group(this->get_x(IntRegT::A0));
                 make_syscall(6, futex);
                 make_syscall(0, sched_yield);
+                make_syscall(1, times);
                 make_syscall(1, uname);
-                make_syscall(1, brk);
-                make_syscall(2, munmap);
                 make_syscall(0, getpid);
                 make_syscall(0, getppid);
                 make_syscall(0, getuid);
                 make_syscall(0, geteuid);
                 make_syscall(0, getgid);
                 make_syscall(0, getegid);
-//                make_syscall(1, sysinfo);
+                make_syscall(1, sysinfo);
+                make_syscall(1, brk);
+                make_syscall(2, munmap);
                 make_syscall(6, mmap);
                 make_syscall(3, mprotect);
                 make_syscall(4, prlimit64);
                 make_syscall(5, statx);
                 default:
-                    this->set_x(IntRegT::A0, -1);
+                    this->set_x(IntRegT::A0, -EPERM);
                     std::cerr << "Invalid environment call number at " << std::hex << this->get_pc()
                               << ", call number " << std::dec << this->get_x(IntRegT::A7)
                               << std::endl;
@@ -985,11 +1063,11 @@ namespace neutron {
             }
         }
 
-        bool goto_main() {
+        bool goto_main(UXLenT addr) {
             bool old_debug = debug;
             debug = false;
 
-            while (static_cast<UXLenT>(this->get_pc()) != this->pcb.elf_main) {
+            while (static_cast<UXLenT>(this->get_pc()) != addr) {
                 if (!sub_type()->visit() && !sub_type()->trap_handler()) return false;
             }
 

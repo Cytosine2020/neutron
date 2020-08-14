@@ -84,39 +84,35 @@ namespace neutron {
         socklen_t len = sizeof(gdb_addr);
 
         if (socket_fd == -1) {
-            if (debug) { *debug_stream << "socket creation failed!" << std::endl; }
+            neutron_warn("socket creation failed!");
             goto error;
         }
 
         if (bind(socket_fd, reinterpret_cast<struct sockaddr *>(&local), sizeof(local)) == -1) {
-            if (debug) { *debug_stream << "socket bind failed!" << std::endl; }
+            neutron_warn("socket bind failed!");
             goto error;
         }
 
         if (listen(socket_fd, 1) == -1) {
-            if (debug) { *debug_stream << "socket listen failed!" << std::endl; }
+            neutron_warn("socket listen failed!");
             goto error;
         }
 
         gdb = ::accept(socket_fd, reinterpret_cast<struct sockaddr *>(&gdb_addr), &len);
 
-        if (debug) {
-            if (gdb == -1) {
-                *debug_stream << "accept failed!" << std::endl;
-            } else {
-                if (debug) {
-                    char *in_addr = reinterpret_cast<char *>(&gdb_addr.sin_addr);
-                    *debug_stream << static_cast<u32>(in_addr[0]) << '.'
-                                  << static_cast<u32>(in_addr[1]) << '.'
-                                  << static_cast<u32>(in_addr[2]) << '.'
-                                  << static_cast<u32>(in_addr[3]) << ':'
-                                  << gdb_addr.sin_port << std::endl;
-                }
-            }
-
+        if (gdb == -1) {
+            neutron_warn("accept failed!");
+            goto error;
         }
 
-        if (gdb == -1) { goto error; }
+        if (debug) {
+            char *in_addr = reinterpret_cast<char *>(&gdb_addr.sin_addr);
+            *debug_stream << static_cast<u32>(in_addr[0]) << '.'
+                          << static_cast<u32>(in_addr[1]) << '.'
+                          << static_cast<u32>(in_addr[2]) << '.'
+                          << static_cast<u32>(in_addr[3]) << ':'
+                          << gdb_addr.sin_port << std::endl;
+        }
 
         close(socket_fd);
 

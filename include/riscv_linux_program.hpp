@@ -41,7 +41,7 @@ namespace neutron {
         static constexpr UXLenT MMAP_BEGIN = 0x90000000;
         static constexpr UXLenT MMAP_END = 0xBF5FB000;
 
-        static constexpr UXLenT SAFE_AREA_SIZE = RISCV_PAGE_SIZE * 4;
+        static constexpr UXLenT GUARD_PAGE_SIZE = RISCV_PAGE_SIZE * 4;
 
         struct iovec {
             UXLenT iov_base;        /* Starting address */
@@ -381,11 +381,11 @@ namespace neutron {
 
             while (next != mem_areas.end()) {
                 if (next->first > length &&
-                    next->first - length >= prev->second.size + prev->first + 2 * SAFE_AREA_SIZE) {
-                    if (offset + length > next->first - SAFE_AREA_SIZE) {
-                        offset = next->first - SAFE_AREA_SIZE - length;
-                    } else if (prev->first + prev->second.size > offset - SAFE_AREA_SIZE) {
-                        offset = prev->first + prev->second.size + SAFE_AREA_SIZE;
+                    next->first - length >= prev->second.size + prev->first + 2 * GUARD_PAGE_SIZE) {
+                    if (offset + length > next->first - GUARD_PAGE_SIZE) {
+                        offset = next->first - GUARD_PAGE_SIZE - length;
+                    } else if (prev->first + prev->second.size > offset - GUARD_PAGE_SIZE) {
+                        offset = prev->first + prev->second.size + GUARD_PAGE_SIZE;
                     }
 
                     mem_areas.emplace(offset, MemArea{src, length, protection});
@@ -403,11 +403,11 @@ namespace neutron {
 
             while (prev != mem_areas.begin()) {
                 if (next->first > length &&
-                    next->first - length >= prev->second.size + prev->first + 2 * SAFE_AREA_SIZE) {
-                    if (offset + length > next->first - SAFE_AREA_SIZE) {
-                        offset = next->first - SAFE_AREA_SIZE - length;
-                    } else if (prev->first + prev->second.size > offset - SAFE_AREA_SIZE) {
-                        offset = prev->first + prev->second.size + SAFE_AREA_SIZE;
+                    next->first - length >= prev->second.size + prev->first + 2 * GUARD_PAGE_SIZE) {
+                    if (offset + length > next->first - GUARD_PAGE_SIZE) {
+                        offset = next->first - GUARD_PAGE_SIZE - length;
+                    } else if (prev->first + prev->second.size > offset - GUARD_PAGE_SIZE) {
+                        offset = prev->first + prev->second.size + GUARD_PAGE_SIZE;
                     }
 
                     mem_areas.emplace(offset, MemArea{src, length, protection});
@@ -431,7 +431,7 @@ namespace neutron {
         std::map<int, int> fd_map;
         std::ostream &debug_stream;
         bool debug, gdb;
-        UXLenT elf_shift, elf_entry, elf_main;
+        UXLenT elf_shift, elf_entry, elf_main, exit_value;
         riscv_isa::IntegerRegister<riscv_isa::xlen_trait> int_reg;
         XLenT pc;
 
@@ -545,6 +545,7 @@ namespace neutron {
 
             /// load stack
 
+            brk += GUARD_PAGE_SIZE;
             start_brk = brk;
             end_brk = STACK_END - STACK_SIZE;
 
@@ -728,7 +729,7 @@ namespace neutron {
             return true;
         }
 
-        UXLenT set_brk(UXLenT addr) {
+        UXLenT set_break(UXLenT addr) {
             if (addr < start_brk || addr > end_brk) return brk;
 
             if (addr < brk) {

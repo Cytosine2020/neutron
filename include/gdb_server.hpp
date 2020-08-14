@@ -39,7 +39,7 @@ namespace neutron {
             }
 
         public:
-            explicit Buffer(usize size, bool debug = false, std::ostream *debug_stream = &std::cout) :
+            explicit Buffer(usize size, bool debug = false, std::ostream *debug_stream = &std::cerr) :
                     array{size}, begin_{0}, end_{0}, debug{debug}, debug_stream{debug_stream} {}
 
             Buffer(Buffer &&other) noexcept = default;
@@ -209,7 +209,7 @@ namespace neutron {
         }
 
     public:
-        explicit GDBServer(bool debug = false, std::ostream &debug_stream = std::cout) :
+        explicit GDBServer(bool debug = false, std::ostream &debug_stream = std::cerr) :
                 recv_buffer{BUF_SIZE, debug, &debug_stream},
                 send_buffer{BUF_SIZE, debug, &debug_stream},
                 gdb{-1}, debug{debug}, debug_stream{&debug_stream} {}

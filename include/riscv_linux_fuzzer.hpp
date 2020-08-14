@@ -3,6 +3,7 @@
 
 
 #include <cerrno>
+#include <fcntl.h>
 
 #include <iostream>
 #include <vector>
@@ -85,9 +86,6 @@ namespace neutron {
         u8 get_jalr_rs1() { return inner.jalr.rs1; }
     };
 
-    class LinuxCore : public LinuxHart<LinuxCore> {
-    };
-
     class LinuxFuzzerCore : public LinuxHart<LinuxFuzzerCore> {
     private:
         using SuperT = LinuxHart<LinuxFuzzerCore>;
@@ -98,50 +96,61 @@ namespace neutron {
         std::vector<BranchRecord> record;
         std::vector<u8> &input;
         usize input_offset;
+        bool main;
 
     public:
         LinuxFuzzerCore(UXLenT hart_id, LinuxProgram<> &mem, std::vector<u8> &input) :
-                LinuxHart<LinuxFuzzerCore>{hart_id, mem}, record{}, input{input}, input_offset{0} {}
+                LinuxHart<LinuxFuzzerCore>{hart_id, mem}, record{}, input{input}, input_offset{0}, main{false} {}
 
         RetT visit_jal_inst(riscv_isa::JALInst *inst) {
-            record.emplace_back(BranchRecord::jal(get_pc(), inst->get_rd()));
+            if (main) {
+                record.emplace_back(BranchRecord::jal(get_pc(), inst->get_rd()));
+            }
 
             return super()->visit_jal_inst(inst);
         }
 
         RetT visit_jalr_inst(riscv_isa::JALRInst *inst) {
-            usize rs1 = inst->get_rs1();
-            XLenT imm = inst->get_imm();
-            UXLenT target = get_bits<UXLenT, XLEN, 1, 1>(get_x(rs1) + imm);
+            if (main) {
+                usize rs1 = inst->get_rs1();
+                XLenT imm = inst->get_imm();
+                UXLenT target = get_bits<UXLenT, XLEN, 1, 1>(get_x(rs1) + imm);
 
-            record.emplace_back(BranchRecord::jalr(get_pc(), target, inst->get_rd(), rs1));
+                record.emplace_back(BranchRecord::jalr(get_pc(), target, inst->get_rd(), rs1));
+            }
 
             return super()->visit_jalr_inst(inst);
         }
 
         RetT visit_beq_inst(riscv_isa::BEQInst *inst) {
-            UXLenT op1 = get_x(inst->get_rs1());
-            UXLenT op2 = get_x(inst->get_rs2());
+            if (main) {
+                UXLenT op1 = get_x(inst->get_rs1());
+                UXLenT op2 = get_x(inst->get_rs2());
 
-            record.emplace_back(BranchRecord::beq(get_pc(), op1, op2));
+                record.emplace_back(BranchRecord::beq(get_pc(), op1, op2));
+            }
 
             return super()->visit_beq_inst(inst);
         }
 
         RetT visit_bne_inst(riscv_isa::BNEInst *inst) {
-            UXLenT op1 = get_x(inst->get_rs1());
-            UXLenT op2 = get_x(inst->get_rs2());
+            if (main) {
+                UXLenT op1 = get_x(inst->get_rs1());
+                UXLenT op2 = get_x(inst->get_rs2());
 
-            record.emplace_back(BranchRecord::bne(get_pc(), op1, op2));
+                record.emplace_back(BranchRecord::bne(get_pc(), op1, op2));
+            }
 
             return super()->visit_bne_inst(inst);
         }
 
         RetT visit_blt_inst(riscv_isa::BLTInst *inst) {
-            UXLenT op1 = get_x(inst->get_rs1());
-            UXLenT op2 = get_x(inst->get_rs2());
+            if (main) {
+                UXLenT op1 = get_x(inst->get_rs1());
+                UXLenT op2 = get_x(inst->get_rs2());
 
-            record.emplace_back(BranchRecord::blt(get_pc(), op1, op2));
+                record.emplace_back(BranchRecord::blt(get_pc(), op1, op2));
+            }
 
             return super()->visit_blt_inst(inst);
         }
@@ -156,19 +165,23 @@ namespace neutron {
         }
 
         RetT visit_bltu_inst(riscv_isa::BLTUInst *inst) {
-            UXLenT op1 = get_x(inst->get_rs1());
-            UXLenT op2 = get_x(inst->get_rs2());
+            if (main) {
+                UXLenT op1 = get_x(inst->get_rs1());
+                UXLenT op2 = get_x(inst->get_rs2());
 
-            record.emplace_back(BranchRecord::bltu(get_pc(), op1, op2));
+                record.emplace_back(BranchRecord::bltu(get_pc(), op1, op2));
+            }
 
             return super()->visit_bltu_inst(inst);
         }
 
         RetT visit_bgeu_inst(riscv_isa::BGEUInst *inst) {
-            UXLenT op1 = get_x(inst->get_rs1());
-            UXLenT op2 = get_x(inst->get_rs2());
+            if (main) {
+                UXLenT op1 = get_x(inst->get_rs1());
+                UXLenT op2 = get_x(inst->get_rs2());
 
-            record.emplace_back(BranchRecord::bgeu(get_pc(), op1, op2));
+                record.emplace_back(BranchRecord::bgeu(get_pc(), op1, op2));
+            }
 
             return super()->visit_bgeu_inst(inst);
         }
@@ -205,11 +218,13 @@ namespace neutron {
                     ret = -EINVAL;
                 }
 
-//                std::cout << "system call: " << ret
-//                          << " = lseek(<fd> " << fd
-//                          << ", <offset> " << offset
-//                          << ", <whence> " << whence
-//                          << ");" << std::endl;
+                if (debug) {
+                    debug_stream << "system call: " << ret
+                                 << " = lseek(<fd> " << fd
+                                 << ", <offset> " << offset
+                                 << ", <whence> " << whence
+                                 << ");" << std::endl;
+                }
 
                 return ret;
             } else {
@@ -241,18 +256,20 @@ namespace neutron {
                 input_offset += size;
                 ret = size;
 
-//                char content[11]{};
-//                UXLenT read_size = std::min(10u, size);
-//
-//                if (pcb.memory_copy_from_guest(content, addr, read_size) != read_size) {
-//                    neutron_unreachable("");
-//                }
-//
-//                std::cout << "system call: " << ret
-//                          << " = read(<fd> " << fd
-//                          << ", <addr> \"" << content
-//                          << "\", <size> " << size
-//                          << ");" << std::endl;
+                if (debug) {
+                    char content[11]{};
+                    UXLenT read_size = std::min(10u, size);
+
+                    if (pcb.memory_copy_from_guest(content, addr, read_size) != read_size) {
+                        neutron_unreachable("");
+                    }
+
+                    debug_stream << "system call: " << ret
+                                 << " = read(<fd> " << fd
+                                 << ", <addr> \"" << content
+                                 << "\", <size> " << size
+                                 << ");" << std::endl;
+                }
 
                 return ret;
             } else {
@@ -261,7 +278,11 @@ namespace neutron {
         }
 
         std::vector<BranchRecord> start() {
-            if (reinterpret_cast<LinuxCore *>(this)->goto_main()) { super()->start(); }
+            if (goto_main(this->pcb.elf_main)) {
+                main = true;
+
+                super()->start();
+            }
 
             return record;
         }

@@ -1,4 +1,3 @@
-#include <fcntl.h>
 #include <iostream>
 #include <sstream>
 
@@ -186,10 +185,6 @@ public:
 bool get_sync_point_for_elf(elf::MappedFileVisitor &visitor, std::map<UXLenT, UXLenT> &sync_point, UXLenT shift) {
     auto *elf_header = elf32::ELFHeader::read(visitor);
     if (elf_header == nullptr) return false;
-    auto *strtab_header = elf_header->get_section_header<elf32::StringTableHeader>(".strtab", visitor);
-    auto *shstrtab_header = elf_header->get_section_header<elf32::StringTableHeader>(".shstrtab", visitor);
-    if (strtab_header == nullptr || shstrtab_header == nullptr) return false;
-    auto string_table = strtab_header->get_table(visitor);
 
     std::map<u32, elf32::SymbolTableHeader::SymbolTableEntry &> functions;
 
@@ -212,8 +207,6 @@ bool get_sync_point_for_elf(elf::MappedFileVisitor &visitor, std::map<UXLenT, UX
         if (func.section_header_index == 0) continue;
         auto &section = elf_header->sections(visitor)[func.section_header_index];
 
-        std::cout << string_table.get_str(func.name) << ':' << std::endl;
-
         void *start = visitor.address((func.value - section.address) + section.offset, func.size);
         if (start == nullptr) return false;
 
@@ -223,11 +216,6 @@ bool get_sync_point_for_elf(elf::MappedFileVisitor &visitor, std::map<UXLenT, UX
         for (auto vertex = blocks.begin(); vertex != blocks.end(); ++vertex) {
             UXLenT first = vertex.get_vertex();
             if (first == 0) continue;
-            std::cout << std::hex << '\t' << first + shift << ':';
-            for (auto successor: vertex.get_successor()) {
-                std::cout << ' ' << (successor == 0 ? 0 : successor + shift);
-            }
-            std::cout << std::dec << std::endl;
         }
 
         auto pos_dominator = PosDominatorTree<UXLenT>::build(blocks, 0);
@@ -236,7 +224,6 @@ bool get_sync_point_for_elf(elf::MappedFileVisitor &visitor, std::map<UXLenT, UX
             UXLenT first = item.first + shift;
             UXLenT second = item.second == 0 ? 0 : item.second + shift;
             sync_point.emplace(first, second);
-            std::cout << '\t' << std::hex << first << ' ' << second << std::dec << std::endl;
         }
     }
 
@@ -315,7 +302,7 @@ int main(int argc, char **argv) {
     const char *system_root = getenv("RISCV_SYSROOT");
 
     std::map<UXLenT, UXLenT> sync_point{};
-    get_sync_point_for_elf(visitor, sync_point, mem1.elf_shift);
+    if (!get_sync_point_for_elf(visitor, sync_point, mem1.elf_shift)) neutron_unreachable("already checked!");
 
     for (auto &item: result) {
         const char *name = item.first.begin();

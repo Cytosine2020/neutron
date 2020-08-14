@@ -19,4 +19,6 @@ int main(int argc, char **argv) {
 
     Core core{0, mem};
     core.start();
+
+    exit(mem.exit_value);
 }

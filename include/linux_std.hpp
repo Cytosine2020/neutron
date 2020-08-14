@@ -535,23 +535,29 @@ namespace neutron {
         u64 __statx_pad2[14];
     };
 
-//    struct sysinfo {
-//        long uptime;             /* Seconds since boot */
-//        unsigned long loads[3];  /* 1, 5, and 15 minute load averages */
-//        unsigned long totalram;  /* Total usable main memory size */
-//        unsigned long freeram;   /* Available memory size */
-//        unsigned long sharedram; /* Amount of shared memory */
-//        unsigned long bufferram; /* Memory used by buffers */
-//        unsigned long totalswap; /* Total swap space size */
-//        unsigned long freeswap;  /* Swap space still available */
-//        unsigned short procs;    /* Number of current processes */
-//        unsigned long totalhigh; /* Total high memory size */
-//        unsigned long freehigh;  /* Available high memory size */
-//        unsigned int mem_unit;   /* Memory unit size in bytes */
-//        char _f[20 - 2 * sizeof(long) - sizeof(int)];
-//        /* Padding to 64 bytes */
-//    };
+    struct sysinfo {
+        i32 uptime;             /* Seconds since boot */
+        u32 loads[3];  /* 1, 5, and 15 minute load averages */
+        u32 totalram;  /* Total usable main memory size */
+        u32 freeram;   /* Available memory size */
+        u32 sharedram; /* Amount of shared memory */
+        u32 bufferram; /* Memory used by buffers */
+        u32 totalswap; /* Total swap space size */
+        u32 freeswap;  /* Swap space still available */
+        u16 procs;    /* Number of current processes */
+        u32 totalhigh; /* Total high memory size */
+        u32 freehigh;  /* Available high memory size */
+        u32 mem_unit;   /* Memory unit size in bytes */
+        u8 _padding[8];
+        /* Padding to 64 bytes */
+    };
 
+    struct tms {
+        u32 utime;
+        u32 stime;
+        u32 cutime;
+        u32 cstime;
+    };
 
 #define FUTEX_WAIT                      0
 #define FUTEX_WAKE                      1

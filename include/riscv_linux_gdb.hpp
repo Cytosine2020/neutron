@@ -27,8 +27,9 @@ namespace neutron {
         using IntRegT = typename LinuxHart<SubT, xlen>::IntRegT;
         using CSRRegT = typename LinuxHart<SubT, xlen>::CSRRegT;
 
-        LinuxGDBHart(UXLenT hart_id, LinuxProgram<xlen> &mem) :
-                LinuxHart<SubT, xlen>{hart_id, mem}, gdb{true} {}
+        LinuxGDBHart(UXLenT hart_id, LinuxProgram<xlen> &mem,
+                     bool debug = false, std::ostream &debug_stream = std::cout) :
+                LinuxHart<SubT, xlen>{hart_id, mem, debug, debug_stream}, gdb{false} {}
 
         bool gdb_handler() {
             while (true) {
@@ -127,28 +128,28 @@ namespace neutron {
             }
         }
 
-        bool gdb_talk() {
+        bool gdb_break_point() {
             return gdb.get_fd() == -1 || (gdb.send_reply("S05") && gdb_handler());
         }
 
 //        XLenT sys_writev(int fd, UXLenT iov, UXLenT iovcnt) {
-//            gdb_talk();
+//            gdb_break_point();
 //            return super()->sys_writev(fd, iov, iovcnt);
 //        }
 //
 //        XLenT sys_write(int fd, UXLenT addr, UXLenT size) {
-//            gdb_talk();
+//            gdb_break_point();
 //            return super()->sys_write(fd, addr, size);
 //        }
 
-        bool break_point_handler(neutron_unused UXLenT addr) { return gdb_talk(); }
+        bool break_point_handler(neutron_unused UXLenT addr) { return gdb_break_point(); }
 
         void start(u32 port) {
-            if (!this->goto_main() || !gdb.gdb_connect(port) || !gdb_handler()) { return; }
+            if (!this->goto_main(this->pcb.elf_main) || !gdb.gdb_connect(port) || !gdb_handler()) { return; }
 
             while (sub_type()->visit() || sub_type()->trap_handler()) {}
 
-            gdb_talk();
+            gdb_break_point();
         }
     };
 }
