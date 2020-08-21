@@ -4,15 +4,20 @@
 using namespace neutron;
 
 
+extern char **environ;
+
+using xlen = riscv_isa::xlen_trait;
+
+
 class Core : public LinuxGDBHart<Core> {
 public:
-    Core(UXLenT hart_id, LinuxProgram<> &mem) : LinuxGDBHart<Core>{hart_id, mem} {}
+    Core(UXLenT hart_id, LinuxProgram<xlen> &mem) : LinuxGDBHart<Core>{hart_id, mem} {}
 };
 
 int main(int argc, char **argv) {
     if (argc < 2) neutron_abort("receive one file name!");
 
-    LinuxProgram<> mem{true};
+    LinuxProgram<xlen> mem{true};
 
     if (!mem.load_elf(argv[1], argc - 1, argv + 1, environ)) neutron_abort("ELF file broken!");
 

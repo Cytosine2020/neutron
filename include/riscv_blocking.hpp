@@ -120,9 +120,11 @@ namespace neutron {
             BlockVisitor *self, riscv_isa::JALInst *inst
     ) {
         if (is_link(inst->get_rd())) {
+            // this is a function call
             UXLenT next_inst = self->inst_offset + riscv_isa::JALInst::INST_WIDTH;
             self->block.emplace(self->inst_offset, std::make_pair(next_inst, next_inst));
         } else {
+            // this is a determined jump
             usize target = self->inst_offset + inst->get_imm();
             self->block.emplace(self->inst_offset, std::make_pair(target, target));
         }
@@ -135,56 +137,51 @@ namespace neutron {
             BlockVisitor *self, riscv_isa::JALRInst *inst
     ) {
         if (is_link(inst->get_rd())) {
+            // this is a function call
             UXLenT next_inst = self->inst_offset + riscv_isa::JALRInst::INST_WIDTH;
             self->block.emplace(self->inst_offset, std::make_pair(next_inst, next_inst));
         } else {
-            self->block.emplace(self->inst_offset, std::make_pair(0, 0)); // zero stands for return to caller
+//            if (self->auipc && inst->get_rs1() == self->auipc_reg) {
+//                // this is an determined long jump
+//                UXLenT next_inst = self->auipc_val + riscv_isa::JALRInst::INST_WIDTH;
+//                self->block.emplace(self->inst_offset, std::make_pair(next_inst, next_inst));
+//            } else {
+            // this is an undetermined jump, zero stands for return to caller
+            self->block.emplace(self->inst_offset, std::make_pair(0, 0));
+//            }
         }
-
         return riscv_isa::JALRInst::INST_WIDTH;
     }
 
     template<>
     BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::BEQInst>::inner(
             BlockVisitor *self, riscv_isa::BEQInst *inst
-    ) {
-        return self->log_branch(inst);
-    }
+    ) { return self->log_branch(inst); }
 
     template<>
     BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::BNEInst>::inner(
             BlockVisitor *self, riscv_isa::BNEInst *inst
-    ) {
-        return self->log_branch(inst);
-    }
+    ) { return self->log_branch(inst); }
 
     template<>
     BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::BLTInst>::inner(
             BlockVisitor *self, riscv_isa::BLTInst *inst
-    ) {
-        return self->log_branch(inst);
-    }
+    ) { return self->log_branch(inst); }
 
     template<>
     BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::BGEInst>::inner(
             BlockVisitor *self, riscv_isa::BGEInst *inst
-    ) {
-        return self->log_branch(inst);
-    }
+    ) { return self->log_branch(inst); }
 
     template<>
     BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::BLTUInst>::inner(
             BlockVisitor *self, riscv_isa::BLTUInst *inst
-    ) {
-        return self->log_branch(inst);
-    }
+    ) { return self->log_branch(inst); }
 
     template<>
     BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::BGEUInst>::inner(
             BlockVisitor *self, riscv_isa::BGEUInst *inst
-    ) {
-        return self->log_branch(inst);
-    }
+    ) { return self->log_branch(inst); }
 }
 
 

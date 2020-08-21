@@ -8,9 +8,11 @@
 #include <sys/stat.h>
 
 #include <map>
+#include <unordered_set>
 #include <vector>
 #include <iomanip>
 #include <random>
+#include <sstream>
 
 #include "elf_header.hpp"
 #include "linux_std.hpp"
@@ -25,7 +27,7 @@ namespace neutron {
         AuxiliaryEntry(UXLenT type, UXLenT value) : type{type}, value{value} {}
     };
 
-    template<typename xlen=riscv_isa::xlen_trait>
+    template<typename xlen>
     class LinuxProgram {
     private:
         using XLenT = typename xlen::XLenT;
@@ -48,6 +50,8 @@ namespace neutron {
             UXLenT iov_len;         /* Number of bytes to transfer */
         };
 
+        static const char *platform_string;
+
     private:
         struct MemArea {
             void *physical;
@@ -55,36 +59,49 @@ namespace neutron {
             riscv_isa::MemoryProtection protection;
         };
 
-        std::pair<riscv_isa::MemoryProtection, int> prot_convert(int prot) {
-            riscv_isa::MemoryProtection guest_prot = riscv_isa::NOT_PRESENT;
-            int host_prot = 0;
-
-            if ((prot & PROT_EXEC) > 0) {
-                if ((prot & PROT_WRITE) > 0) {
-                    guest_prot = riscv_isa::EXECUTE_READ_WRITE;
-                    host_prot = PROT_READ | PROT_WRITE;
+        riscv_isa::MemoryProtection prot_convert_to_guest(int prot) {
+            if ((prot & NEUTRON_PROT_EXEC) > 0) {
+                if ((prot & NEUTRON_PROT_WRITE) > 0) {
+                    return riscv_isa::EXECUTE_READ_WRITE;
                 } else if ((prot & PROT_READ) > 0) {
-                    guest_prot = riscv_isa::EXECUTE_READ;
-                    host_prot = PROT_READ;
+                    return riscv_isa::EXECUTE_READ;
                 } else {
-                    guest_prot = riscv_isa::EXECUTE;
-                    host_prot = PROT_READ;
+                    return riscv_isa::EXECUTE;
                 }
             } else {
-                if ((prot & PROT_WRITE) > 0) {
-                    guest_prot = riscv_isa::READ_WRITE;
-                    host_prot = PROT_READ | PROT_WRITE;
-                } else if ((prot & PROT_READ) > 0) {
-                    guest_prot = riscv_isa::EXECUTE_READ;
-                    host_prot = PROT_READ;
+                if ((prot & NEUTRON_PROT_WRITE) > 0) {
+                    return riscv_isa::READ_WRITE;
+                } else if ((prot & NEUTRON_PROT_READ) > 0) {
+                    return riscv_isa::READ;
                 }
             }
 
-            return gdb ? std::make_pair(guest_prot, PROT_READ | PROT_WRITE)
-                       : std::make_pair(guest_prot, host_prot);
+            return riscv_isa::NOT_PRESENT;
         }
 
-        bool load_section(elf::MappedFileVisitor &visitor, elf32::ExecutableHeader *loadable, XLenT shift) {
+        int prot_convert_to_host(int prot) {
+            if (gdb) {
+                return PROT_READ | PROT_WRITE;
+            } else {
+                if ((prot & NEUTRON_PROT_EXEC) > 0) {
+                    if ((prot & NEUTRON_PROT_WRITE) > 0) {
+                        return PROT_READ | PROT_WRITE;
+                    } else {
+                        return PROT_READ;
+                    }
+                } else {
+                    if ((prot & NEUTRON_PROT_WRITE) > 0) {
+                        return PROT_READ | PROT_WRITE;
+                    } else if ((prot & NEUTRON_PROT_READ) > 0) {
+                        return PROT_READ;
+                    }
+                }
+            }
+
+            return PROT_NONE;
+        }
+
+        bool load_section(elf::MappedFileVisitor &visitor, elf::ExecutableHeader<UXLenT> *loadable, XLenT shift) {
             if (MEM_END <= loadable->mem_size || loadable->virtual_address >= MEM_END - loadable->mem_size)
                 return false;
 
@@ -134,7 +151,7 @@ namespace neutron {
                 usize len = strlen(argv[i]) + 1;
                 stack_ptr -= len;
 
-                if (memory_copy_to_guest(stack_ptr, argv[i], len) != len) { return false; }
+                if (!memory_copy_to_guest(stack_ptr, argv[i], len)) { return false; }
 
                 arg_vec[i] = stack_ptr;
                 if (i == 0) { auxv.emplace_back(NEUTRON_AT_EXECFN, stack_ptr); }
@@ -154,6 +171,7 @@ namespace neutron {
             }
 
             environment.erase("LD_LIBRARY_PATH");
+            environment.erase("LD_PRELOAD");
             environment.erase("RISCV_SYSROOT");
 
             for (auto pair: environment) {
@@ -175,7 +193,7 @@ namespace neutron {
 
                 stack_ptr -= len;
 
-                if (memory_copy_to_guest(stack_ptr, real_env, len) != len) { return false; }
+                if (!memory_copy_to_guest(stack_ptr, real_env, len)) { return false; }
                 env_vec[env_vec_count++] = stack_ptr;
             }
 
@@ -185,22 +203,21 @@ namespace neutron {
             // auxiliary vector
 
             // platform
-            const char *string = "riscv32";
-            usize len = strlen(string) + 1;
+            usize len = strlen(platform_string) + 1;
 
             stack_ptr -= len;
-            if (memory_copy_to_guest(stack_ptr, string, len) != len) { return false; }
+            if (!memory_copy_to_guest(stack_ptr, platform_string, len)) { return false; }
             auxv.emplace_back(NEUTRON_AT_PLATFORM, stack_ptr);
 
             // random
-            std::default_random_engine engine{static_cast<u32>(clock())};
+            std::random_device engine{};
             std::uniform_int_distribution<UXLenT> dist{};
             UXLenT rand = dist(engine);
-            string = reinterpret_cast<const char *>(&rand);
+            const char *string = reinterpret_cast<const char *>(&rand);
             len = sizeof(rand);
 
             stack_ptr -= len;
-            if (memory_copy_to_guest(stack_ptr, string, len) != len) { return false; }
+            if (!memory_copy_to_guest(stack_ptr, string, len)) { return false; }
             auxv.emplace_back(NEUTRON_AT_RANDOM, stack_ptr);
             auxv.emplace_back(NEUTRON_AT_NULL, 0);
 
@@ -211,25 +228,25 @@ namespace neutron {
             usize aux_vec_size = sizeof(AuxiliaryEntry<UXLenT>) * auxv.size();
 
             stack_ptr -= aux_vec_size;
-            if (memory_copy_to_guest(stack_ptr, auxv.data(), aux_vec_size) != aux_vec_size) {
+            if (!memory_copy_to_guest(stack_ptr, auxv.data(), aux_vec_size)) {
                 return false;
             }
 
             // envp
             stack_ptr -= env_vec_size;
-            if (memory_copy_to_guest(stack_ptr, env_vec.data(), env_vec_size) != env_vec_size) {
+            if (!memory_copy_to_guest(stack_ptr, env_vec.data(), env_vec_size)) {
                 return false;
             }
 
             // argv
             stack_ptr -= arg_vec_size;
-            if (memory_copy_to_guest(stack_ptr, arg_vec.data(), arg_vec_size) != arg_vec_size) {
+            if (!memory_copy_to_guest(stack_ptr, arg_vec.data(), arg_vec_size)) {
                 return false;
             }
 
             // argc
             stack_ptr -= xlen::XLEN_BYTE;
-            auto ptr = address<u32>(stack_ptr, riscv_isa::READ_WRITE);
+            auto ptr = address<UXLenT>(stack_ptr, riscv_isa::READ_WRITE);
             if (ptr == nullptr) return false;
             *ptr = argc;
 
@@ -238,11 +255,12 @@ namespace neutron {
             return true;
         }
 
-        XLenT load_program(elf::MappedFileVisitor &visitor, elf32::ELFHeader *header) {
-            std::vector<elf32::ExecutableHeader *> elf_load{};
+        XLenT load_program(elf::MappedFileVisitor &visitor, elf::ELFHeader<UXLenT> *header) {
+            std::vector<elf::ExecutableHeader<UXLenT> *> elf_load{};
 
             for (auto &program: header->programs(visitor)) {
-                auto *loadable = elf32::ProgramHeader::cast<elf32::ExecutableHeader>(&program, visitor);
+                auto *loadable = elf::ProgramHeader<UXLenT>::template
+                cast<elf::ExecutableHeader<UXLenT>>(&program, visitor);
                 if (loadable != nullptr) elf_load.emplace_back(loadable);
             }
 
@@ -261,7 +279,7 @@ namespace neutron {
 
             XLenT shift;
 
-            if (header->file_type == elf32::ELFHeader::SHARED) {
+            if (header->file_type == elf::ELFHeader<UXLenT>::SHARED) {
                 shift = MMAP_BEGIN - elf_start; // todo: rand
             } else {
                 shift = 0; // todo: cannot relocate
@@ -345,11 +363,6 @@ namespace neutron {
                 }
             }
 
-            if (debug) {
-                debug_stream << "file: " << file_addr << ':' << file_addr + file_map
-                             << "; mem: " << mem_addr_map << ':' << mem_addr_map + mem_map << std::endl;
-            }
-
             if (fix) {
                 return add_map_fix(mem_addr_map, mem_ptr, mem_map, prot);
             } else {
@@ -422,24 +435,33 @@ namespace neutron {
             return 0;
         }
 
-        usize host_page_size;
+        std::string sysroot;
         std::map<UXLenT, MemArea> mem_areas;
+        std::map<int, int> fd_map;
+        std::unordered_set<int> close_execute; // contains guest fd
+        int fd_free_lower_bound;
         UXLenT brk;
         UXLenT start_brk, end_brk;
 
     public:
-        std::map<int, int> fd_map;
-        std::ostream &debug_stream;
-        bool debug, gdb;
         UXLenT elf_shift, elf_entry, elf_main, exit_value;
         riscv_isa::IntegerRegister<riscv_isa::xlen_trait> int_reg;
         XLenT pc;
+        bool gdb;
 
         explicit LinuxProgram(bool gdb = false) :
-                host_page_size{0}, mem_areas{}, brk{MEM_BEGIN},
-                debug_stream{std::cerr}, debug{false}, gdb{gdb}, int_reg{}, pc{0} {
+                sysroot{std::getenv("RISCV_SYSROOT") ?: ""},
+                mem_areas{}, fd_map{}, close_execute{}, fd_free_lower_bound{0},
+                brk{MEM_BEGIN}, start_brk{0}, end_brk{0},
+                elf_shift{0}, elf_entry{0}, elf_main{0}, exit_value{0},
+                int_reg{}, pc{0}, gdb{gdb} {
             mem_areas.emplace(0, MemArea{nullptr, MEM_BEGIN, riscv_isa::NOT_PRESENT});
             mem_areas.emplace(0xC0000000, MemArea{nullptr, 0x40000000, riscv_isa::NOT_PRESENT});
+            fd_map.emplace(0, dup(0));
+            fd_map.emplace(1, dup(1));
+            fd_map.emplace(2, dup(2));
+
+            // todo: regularize sysroot
         }
 
         LinuxProgram(const LinuxProgram &other) = delete;
@@ -447,39 +469,36 @@ namespace neutron {
         LinuxProgram &operator=(const LinuxProgram &other) = delete;
 
         bool load_elf(const char *elf_name, int argc, char **argv, char **envp) {
-            host_page_size = sysconf(_SC_PAGE_SIZE);
             u32 clock_per_second = sysconf(_SC_CLK_TCK);
-            if (host_page_size <= 0) return false;
 
             /// get elf header
 
             auto elf_visitor = elf::MappedFileVisitor::open_elf(elf_name);
             if (elf_visitor.get_fd() == -1) neutron_abort("Failed to open ELF file!");
 
-            auto *elf_header = elf32::ELFHeader::read(elf_visitor);
-            if (elf_header == nullptr || (elf_header->file_type != elf32::ELFHeader::EXECUTABLE &&
-                                          elf_header->file_type != elf32::ELFHeader::SHARED)) {
+            auto *elf_header = elf::ELFHeader<UXLenT>::read(elf_visitor);
+            if (elf_header == nullptr || (elf_header->file_type != elf::ELFHeader<UXLenT>::EXECUTABLE &&
+                                          elf_header->file_type != elf::ELFHeader<UXLenT>::SHARED)) {
                 return false;
             }
 
             /// get first interpreter files
 
             elf::MappedFileVisitor int_visitor{};
-            elf32::ELFHeader *int_header = nullptr;
+            elf::ELFHeader<UXLenT> *int_header = nullptr;
 
             for (auto &program: elf_header->programs(elf_visitor)) {
-                auto *inter_path_name = elf32::ProgramHeader::cast<elf32::InterPathHeader>(&program, elf_visitor);
+                auto *inter_path_name = elf::ProgramHeader<UXLenT>::template
+                        cast<elf::InterPathHeader<UXLenT>>(&program, elf_visitor);
                 if (inter_path_name == nullptr) continue;
-
-                std::string sysroot = std::getenv("RISCV_SYSROOT") ?: "";
 
                 auto lib_path = sysroot + inter_path_name->get_path_name(elf_visitor);
                 int_visitor = elf::MappedFileVisitor::open_elf(lib_path.c_str());
                 if (int_visitor.get_fd() == -1) return false;
 
-                int_header = elf32::ELFHeader::read(int_visitor);
-                if (int_header == nullptr || (int_header->file_type != elf32::ELFHeader::EXECUTABLE &&
-                                              int_header->file_type != elf32::ELFHeader::SHARED)) {
+                int_header = elf::ELFHeader<UXLenT>::read(int_visitor);
+                if (int_header == nullptr || (int_header->file_type != elf::ELFHeader<UXLenT>::EXECUTABLE &&
+                                              int_header->file_type != elf::ELFHeader<UXLenT>::SHARED)) {
                     return false;
                 }
 
@@ -494,8 +513,10 @@ namespace neutron {
             if (elf_entry == 0) return false;
 
             // get the main function
-            auto *symtab_header = elf_header->get_section_header<elf32::SymbolTableHeader>(".symtab", elf_visitor);
-            auto *strtab_header = elf_header->get_section_header<elf32::StringTableHeader>(".strtab", elf_visitor);
+            auto *symtab_header = elf_header->template
+                    get_section_header<elf::SymbolTableHeader<UXLenT>>(".symtab", elf_visitor);
+            auto *strtab_header = elf_header->template
+                    get_section_header<elf::StringTableHeader<UXLenT>>(".strtab", elf_visitor);
             if (symtab_header == nullptr || strtab_header == nullptr) return false;
             auto symbol_table = symtab_header->get_table(elf_visitor);
             auto string_table = strtab_header->get_table(elf_visitor);
@@ -505,13 +526,6 @@ namespace neutron {
                     elf_main = symbol.value + elf_shift;
                     break;
                 }
-            }
-
-            if (debug) {
-                debug_stream << std::hex
-                             << "elf shift: " << elf_shift
-                             << ", elf entry: " << elf_entry
-                             << std::dec << std::endl;
             }
 
             UXLenT elf_header_addr;
@@ -534,13 +548,6 @@ namespace neutron {
                 int_shift = load_program(int_visitor, int_header);
                 int_entry = int_header->entry_point + int_shift;
                 if (int_entry == 0) return false;
-
-                if (debug) {
-                    debug_stream << std::hex
-                                 << "int shift: " << int_shift
-                                 << ", int entry: " << int_entry
-                                 << std::dec << std::endl;
-                }
             }
 
             /// load stack
@@ -588,50 +595,32 @@ namespace neutron {
             return reinterpret_cast<T *>(static_cast<u8 *>(before->second.physical) - before->first + addr);
         }
 
-        UXLenT memory_copy_to_guest(UXLenT dest, const void *src, UXLenT size) {
-            if (MEM_END - dest < size) return 0;
+        bool memory_copy_to_guest(UXLenT dest, const void *src, UXLenT size) {
+            if (MEM_END - dest < size) return false;
 
-            UXLenT count = 0;
-            auto before = --mem_areas.upper_bound(dest);
+            std::vector<::iovec> buf{};
+            if (!memory_get_vector(dest, size, riscv_isa::W_BIT, buf)) return false;
 
-            while (size > 0) {
-                if (dest >= before->first + before->second.size) return 0;
-                if ((before->second.protection & riscv_isa::W_BIT) == 0) return 0;
-
-                UXLenT byte = std::min(before->second.size, size);
-                memcpy(reinterpret_cast<u8 *>(before->second.physical) - before->first + dest, src, byte);
-
-                count += byte;
-                dest += byte;
-                src = reinterpret_cast<const u8 *>(src) + byte;
-                size -= byte;
-                ++before;
+            for (auto &item: buf) {
+                memcpy(item.iov_base, src, item.iov_len);
+                src = reinterpret_cast<const u8 *>(src) + item.iov_len;
             }
 
-            return count;
+            return true;
         }
 
-        UXLenT memory_copy_from_guest(void *dest, UXLenT src, UXLenT size) {
-            if (MEM_END - src < size) return 0;
+        bool memory_copy_from_guest(void *dest, UXLenT src, UXLenT size) {
+            if (MEM_END - src < size) return false;
 
-            UXLenT count = 0;
-            auto before = --mem_areas.upper_bound(src);
+            std::vector<::iovec> buf{};
+            if (!memory_get_vector(src, size, riscv_isa::R_BIT, buf)) return false;
 
-            while (size > 0) {
-                if (src - before->first >= before->second.size) return 0;
-                if ((before->second.protection & riscv_isa::R_BIT) == 0) return 0;
-
-                UXLenT byte = std::min(before->second.size, size);
-                memcpy(dest, reinterpret_cast<u8 *>(before->second.physical) - before->first + src, byte);
-
-                count += byte;
-                dest = reinterpret_cast<u8 *>(src) + byte;
-                src += byte;
-                size -= byte;
-                ++before;
+            for (auto &item: buf) {
+                memcpy(dest, item.iov_base, item.iov_len);
+                dest = reinterpret_cast<u8 *>(src) + item.iov_len;
             }
 
-            return count;
+            return true;
         }
 
         bool string_copy_from_guest(UXLenT src, Array<char> &buf) {
@@ -639,7 +628,7 @@ namespace neutron {
             UXLenT addr = src;
             UXLenT len = 0;
 
-            while(true) {
+            while (true) {
                 if (addr - before->first >= before->second.size) return false;
                 if ((before->second.protection & riscv_isa::R_BIT) == 0) return false;
 
@@ -660,7 +649,7 @@ namespace neutron {
 
             Array<char> dest{len};
 
-            if (memory_copy_from_guest(dest.begin(), src, len) != len) { neutron_unreachable(""); }
+            if (!memory_copy_from_guest(dest.begin(), src, len)) { neutron_unreachable(""); }
 
             buf = std::move(dest);
 
@@ -673,7 +662,7 @@ namespace neutron {
             Array<iovec> vec{iovcnt};
             usize vec_size = iovcnt * sizeof(iovec);
 
-            if (memory_copy_from_guest(vec.begin(), iov, vec_size) == vec_size) {
+            if (memory_copy_from_guest(vec.begin(), iov, vec_size)) {
                 buf.reserve(iovcnt);
 
                 for (usize i = 0; i < iovcnt; ++i) {
@@ -756,9 +745,8 @@ namespace neutron {
             bool fix = false;
             void *map = MAP_FAILED;
 
-            auto pair = prot_convert(prot);
-            auto guest_prot = pair.first;
-            auto host_prot = pair.second;
+            auto guest_prot = prot_convert_to_guest(prot);
+            auto host_prot = prot_convert_to_host(prot);
 
             UXLenT guest_addr = addr / RISCV_PAGE_SIZE * RISCV_PAGE_SIZE;
             UXLenT guest_length = divide_ceil(length, RISCV_PAGE_SIZE) * RISCV_PAGE_SIZE;
@@ -781,7 +769,7 @@ namespace neutron {
 
             if ((flags & NEUTRON_MAP_STACK) > 0) { neutron_abort("MAP_STACK not support!"); }
 
-            map = mmap(nullptr, length, host_prot, host_flags, fd, offset << 12);
+            map = mmap(nullptr, length, host_prot, host_flags, get_host_fd(fd), offset << 12);
 
             if (map != MAP_FAILED) {
                 if (fix) {
@@ -804,9 +792,8 @@ namespace neutron {
         XLenT memory_protection(UXLenT offset, UXLenT length, XLenT prot) {
             if (offset % RISCV_PAGE_SIZE != 0 || MEM_END - length < offset) return -EINVAL;
 
-            auto pair = prot_convert(prot);
-            auto guest_prot = pair.first;
-            auto host_prot = pair.second;
+            auto guest_prot = prot_convert_to_guest(prot);
+            auto host_prot = prot_convert_to_host(prot);
 
             auto before = --mem_areas.upper_bound(offset);
 
@@ -951,6 +938,122 @@ namespace neutron {
             }
         }
 
+        std::string get_host_file_name(const char *name) {
+            // todo: regularize file name
+
+            std::string sysroot_name = sysroot + name;
+
+            if (name[0] == '/') {
+                if (strncmp(name, "/etc", 4) == 0 ||
+                    access(sysroot_name.c_str(), F_OK) == 0) {
+                    return sysroot_name;
+                }
+            }
+
+            return name;
+        }
+
+        /// dir_fd: host fd
+        std::string get_host_file_name(int dir_fd, const char *name) {
+            if (name[0] == '/') {
+                return get_host_file_name(name);
+            } else {
+                // todo: errno
+
+                std::stringstream tmp{};
+                tmp << "/proc/self/fd/" << dir_fd;
+
+                char buf[PATH_MAX]{};
+                isize num = readlink(tmp.str().c_str(), buf, PATH_MAX);
+                if (num == -1) return "";
+
+                std::stringstream abs_name{};
+                abs_name << buf << name;
+                return get_host_file_name(abs_name.str().c_str());
+            }
+        }
+
+        std::string get_guest_file_name(const char *name) {
+            // todo: regularize name
+
+            if (strncmp(name, sysroot.data(), sysroot.size()) == 0) {
+                name += sysroot.size();
+            }
+
+            if (name[0] == '\0') {
+                name = "/";
+            }
+
+            return name;
+        }
+
+        int get_host_fd(int fd) {
+            if (fd < 0) return fd;
+
+            auto ptr = fd_map.find(fd);
+
+            if (ptr != fd_map.end()) {
+                return ptr->second;
+            } else {
+                return -1;
+            }
+        }
+
+        int get_guest_fd(int fd) {
+            if (fd < 0) return fd;
+
+            int ret = fd_free_lower_bound;
+            for (auto &item: fd_map) {
+                if (item.first == ret) {
+                    ++ret;
+                } else {
+                    break;
+                }
+            }
+
+            fd_map.emplace(ret, fd);
+
+            fd_free_lower_bound = ret + 1;
+
+            return ret;
+        }
+
+        void set_close_exec(int fd, bool flag) {
+            if (flag) {
+                close_execute.emplace(fd);
+            } else {
+                close_execute.erase(fd);
+            }
+        }
+
+        /// close guest fd
+        int close_fd(int fd) {
+            int ret;
+
+            if (fd < 0) {
+                return -EBADF;
+            } else {
+                auto ptr = fd_map.find(fd);
+
+                if (ptr != fd_map.end()) {
+                    ret = close(ptr->second);
+
+                    if (ret == -1) {
+                        ret = -errno;
+                    }
+
+                    fd_map.erase(fd);
+                    close_execute.erase(fd);
+
+                    fd_free_lower_bound = std::min(fd_free_lower_bound, fd);
+                } else {
+                    ret = -EBADF;
+                }
+            }
+
+            return ret;
+        }
+
         ~LinuxProgram() {
             for (auto &area: mem_areas) {
                 if (area.second.physical != nullptr) {
@@ -961,6 +1064,12 @@ namespace neutron {
             for (auto &item: fd_map) { close(item.second); }
         }
     };
+
+    template<>
+    const char *LinuxProgram<riscv_isa::xlen_32_trait>::platform_string = "riscv32";
+
+    template<>
+    const char *LinuxProgram<riscv_isa::xlen_64_trait>::platform_string = "riscv64";
 }
 
 
