@@ -15,6 +15,7 @@
 #include <sys/syscall.h>
 #include <sys/times.h>
 #include <sys/resource.h>
+#include <linux/futex.h>
 
 #include <iostream>
 #include <map>
@@ -35,8 +36,6 @@ namespace neutron {
 
     protected:
         LinuxProgram<xlen> &pcb;
-        std::string riscv_sysroot;
-
         std::ostream &debug_stream;
         bool debug;
 
@@ -50,14 +49,8 @@ namespace neutron {
         LinuxHart(UXLenT hart_id, LinuxProgram<xlen> &mem,
                   bool debug = false, std::ostream &debug_stream = std::cerr) :
                 riscv_isa::Hart<SubT>{hart_id, mem.pc, mem.int_reg}, pcb{mem},
-                riscv_sysroot{getenv("RISCV_SYSROOT")}, debug_stream{debug_stream}, debug{debug} {
+                debug_stream{debug_stream}, debug{debug} {
             this->cur_level = riscv_isa::USER_MODE;
-
-            pcb.debug = debug;
-
-            pcb.fd_map.emplace(0, dup(0));
-            pcb.fd_map.emplace(1, dup(1));
-            pcb.fd_map.emplace(2, dup(2));
         }
 
         template<typename ValT>
@@ -140,45 +133,18 @@ namespace neutron {
             return true; // todo
         }
 
-        int get_host_fd(int fd) {
-            if (fd < 0) return fd;
+        std::string get_host_file_name(const char *name) { return pcb.get_host_file_name(name); }
 
-            auto ptr = pcb.fd_map.find(fd);
-
-            if (ptr != pcb.fd_map.end()) {
-                return ptr->second;
-            } else {
-                return -1;
-            }
+        /// dir_fd: guest fd
+        std::string get_host_file_name(int dir_fd, const char *name) {
+            return pcb.get_host_file_name(sub_type()->get_host_fd(dir_fd), name);
         }
 
-        int get_guest_fd(int fd) {
-            if (fd < 0) return fd;
+        std::string get_guest_file_name(const char *name) { return pcb.get_guest_file_name(name); }
 
-            auto ptr = pcb.fd_map.rbegin();
+        int get_host_fd(int fd) { return pcb.get_host_fd(fd); }
 
-            int ret;
-
-            if (ptr != pcb.fd_map.rend()) {
-                ret = ptr->first + 1;
-            } else {
-                ret = 0;
-            }
-
-            pcb.fd_map.emplace(ret, fd);
-
-            return ret;
-        }
-
-        std::string file_name_resolve(const std::string &origin) {
-            if (origin[0] == '/') {
-                if (origin == "/etc/ld.so.cache") return riscv_sysroot + origin;
-                if (origin == "/etc/ld.so.preload") return riscv_sysroot + origin;
-                if (access((riscv_sysroot + origin).c_str(), F_OK) == 0) return riscv_sysroot + origin;
-            }
-
-            return origin;
-        }
+        int get_guest_fd(int fd) { return pcb.get_guest_fd(fd); }
 
         XLenT sys_getcwd(UXLenT buf, UXLenT size) {
             Array<char> host_buf{size};
@@ -188,16 +154,9 @@ namespace neutron {
             const char *result = getcwd(host_buf.begin(), size);
 
             if (result != nullptr) {
-                usize len = strlen(host_buf.begin());
+                std::string real_name = sub_type()->get_guest_file_name(result);
 
-                if (strncmp(result, riscv_sysroot.data(), riscv_sysroot.size()) == 0) {
-                    result += riscv_sysroot.size();
-                }
-
-                if (*result == '\0') { result = "/"; }
-
-                usize byte = pcb.memory_copy_to_guest(buf, result, host_buf.end() - result);
-                if (byte != len) {
+                if (!pcb.memory_copy_to_guest(buf, real_name.data(), real_name.size() + 1)) {
                     ret = -EFAULT;
                 }
             } else {
@@ -217,15 +176,204 @@ namespace neutron {
         XLenT sys_fcntl(int fd, XLenT cmd, XLenT arg) {
             XLenT ret;
 
-            ret = fcntl(get_host_fd(fd), cmd, arg);
+            switch (cmd) {
+                case NEUTRON_F_SETLK:
+                case NEUTRON_F_SETLKW:
+                case NEUTRON_F_OFD_SETLK:
+                case NEUTRON_F_OFD_SETLKW: {
+                    struct ::flock host_buf{};
+                    flock guest_buf{};
 
-            if (ret == -1) {
-                ret = -errno;
-            } else {
+                    if (pcb.memory_copy_from_guest(&guest_buf, arg, sizeof(guest_buf))) {
+                        host_buf.l_type = guest_buf.l_type;
+                        host_buf.l_whence = guest_buf.l_whence;
+                        host_buf.l_start = guest_buf.l_start;
+                        host_buf.l_len = guest_buf.l_len;
+                        host_buf.l_pid = guest_buf.l_pid;
+
+                        ret = fcntl(sub_type()->get_host_fd(fd), cmd, &host_buf);
+
+                        if (ret == -1) {
+                            ret = -errno;
+                        }
+                    } else {
+                        ret = -EFAULT;
+                    }
+                }
+                    break;
+                case NEUTRON_F_GETLK:
+                case NEUTRON_F_OFD_GETLK: {
+                    struct ::flock host_buf{};
+                    flock guest_buf{};
+
+                    if (pcb.memory_copy_from_guest(&guest_buf, arg, sizeof(guest_buf))) {
+                        host_buf.l_type = guest_buf.l_type;
+                        host_buf.l_whence = guest_buf.l_whence;
+                        host_buf.l_start = guest_buf.l_start;
+                        host_buf.l_len = guest_buf.l_len;
+                        host_buf.l_pid = guest_buf.l_pid;
+
+                        ret = fcntl(sub_type()->get_host_fd(fd), cmd, &host_buf);
+
+                        if (ret == -1) {
+                            ret = -errno;
+                        } else {
+                            guest_buf.l_type = host_buf.l_type;
+                            guest_buf.l_whence = host_buf.l_whence;
+                            guest_buf.l_start = host_buf.l_start;
+                            guest_buf.l_len = host_buf.l_len;
+                            guest_buf.l_pid = host_buf.l_pid;
+
+                            if (!pcb.memory_copy_to_guest(arg, &guest_buf, sizeof(guest_buf))) {
+                                ret = -EFAULT; // this should never happen.
+                            }
+                        }
+                    } else {
+                        ret = -EFAULT;
+                    }
+                }
+                    break;
+                case NEUTRON_F_SETLK64:
+                case NEUTRON_F_SETLKW64: {
+                    struct ::flock64 host_buf{};
+                    flock64 guest_buf{};
+
+                    if (pcb.memory_copy_from_guest(&guest_buf, arg, sizeof(guest_buf))) {
+                        host_buf.l_type = guest_buf.l_type;
+                        host_buf.l_whence = guest_buf.l_whence;
+                        host_buf.l_start = guest_buf.l_start;
+                        host_buf.l_len = guest_buf.l_len;
+                        host_buf.l_pid = guest_buf.l_pid;
+
+                        ret = fcntl(sub_type()->get_host_fd(fd), cmd, &host_buf);
+
+                        if (ret == -1) {
+                            ret = -errno;
+                        }
+                    } else {
+                        ret = -EFAULT;
+                    }
+                }
+                    break;
+                case NEUTRON_F_GETLK64: {
+                    struct ::flock64 host_buf{};
+                    flock64 guest_buf{};
+
+                    if (pcb.memory_copy_from_guest(&guest_buf, arg, sizeof(guest_buf))) {
+                        host_buf.l_type = guest_buf.l_type;
+                        host_buf.l_whence = guest_buf.l_whence;
+                        host_buf.l_start = guest_buf.l_start;
+                        host_buf.l_len = guest_buf.l_len;
+                        host_buf.l_pid = guest_buf.l_pid;
+
+                        ret = fcntl(sub_type()->get_host_fd(fd), cmd, &host_buf);
+
+                        if (ret == -1) {
+                            ret = -errno;
+                        } else {
+                            guest_buf.l_type = host_buf.l_type;
+                            guest_buf.l_whence = host_buf.l_whence;
+                            guest_buf.l_start = host_buf.l_start;
+                            guest_buf.l_len = host_buf.l_len;
+                            guest_buf.l_pid = host_buf.l_pid;
+
+                            if (!pcb.memory_copy_to_guest(arg, &guest_buf, sizeof(guest_buf))) {
+                                ret = -EFAULT; // this should never happen.
+                            }
+                        }
+                    } else {
+                        ret = -EFAULT;
+                    }
+                }
+                    break;
+                case NEUTRON_F_GETOWN_EX: {
+                    struct ::f_owner_ex host_buf{};
+                    f_owner_ex guest_buf{};
+
+                    ret = fcntl(sub_type()->get_host_fd(fd), cmd, &host_buf);
+
+                    if (ret == -1) {
+                        ret = -errno;
+                    } else {
+                        guest_buf.type = static_cast<f_owner_ex::pid_type>(host_buf.type);
+                        guest_buf.pid = host_buf.pid;
+
+                        if (!pcb.memory_copy_to_guest(arg, &guest_buf, sizeof(guest_buf))) {
+                            ret = -EFAULT;
+                        }
+                    }
+                }
+                    break;
+                case NEUTRON_F_SETOWN_EX: {
+                    struct ::f_owner_ex host_buf{};
+                    f_owner_ex guest_buf{};
+
+                    if (pcb.memory_copy_from_guest(&guest_buf, arg, sizeof(guest_buf))) {
+                        host_buf.type = static_cast<__pid_type>(guest_buf.type);
+                        host_buf.pid = guest_buf.pid;
+
+                        ret = fcntl(sub_type()->get_host_fd(fd), cmd, &host_buf);
+
+                        if (ret == -1) {
+                            ret = -errno;
+                        }
+                    } else {
+                        ret = -EFAULT;
+                    }
+                }
+
+                    break;
+                case NEUTRON_F_GET_RW_HINT:
+                case NEUTRON_F_GET_FILE_RW_HINT: {
+                    u64 host_buf, guest_buf;
+                    ret = fcntl(sub_type()->get_host_fd(fd), cmd, &host_buf);
+
+                    if (ret == -1) {
+                        ret = -errno;
+                    } else {
+                        guest_buf = host_buf;
+                        if (!pcb.memory_copy_to_guest(arg, &guest_buf, sizeof(guest_buf))) {
+                            ret = -EFAULT;
+                        }
+                    }
+                }
+                    break;
+                case NEUTRON_F_SET_RW_HINT:
+                case NEUTRON_F_SET_FILE_RW_HINT: {
+                    u64 host_buf, guest_buf;
+
+                    if (pcb.memory_copy_from_guest(&guest_buf, arg, sizeof(guest_buf))) {
+                        host_buf = guest_buf;
+                        ret = fcntl(sub_type()->get_host_fd(fd), cmd, &host_buf);
+
+                        if (ret == -1) {
+                            ret = -errno;
+                        }
+                    } else {
+                        ret = -EFAULT;
+                    }
+                }
+                    break;
+                default:
+                    ret = fcntl(sub_type()->get_host_fd(fd), cmd, arg);
+
+                    if (ret == -1) {
+                        ret = -errno;
+                    }
+            }
+
+            if (ret > 0) {
                 switch (cmd) {
-                    case F_DUPFD:
-                    case F_DUPFD_CLOEXEC:
-                        ret = get_guest_fd(ret);
+                    case NEUTRON_F_DUPFD:
+                        ret = sub_type()->get_guest_fd(ret);
+                        break;
+                    case NEUTRON_F_DUPFD_CLOEXEC:
+                        ret = sub_type()->get_guest_fd(ret);
+                        pcb.set_close_exec(ret, true);
+                        break;
+                    case NEUTRON_F_SETFD:
+                        pcb.set_close_exec(fd, (arg & NEUTRON_FD_CLOEXEC) == NEUTRON_FD_CLOEXEC);
+                        break;
                 }
             }
 
@@ -246,9 +394,11 @@ namespace neutron {
 
             Array<u8> buf{size};
 
-            if (pcb.memory_copy_from_guest(buf.begin(), argp, size) == size) {
-                ret = ioctl(get_host_fd(fd), request, argp);
-                if (ret == -1) { ret = -errno; }
+            if (pcb.memory_copy_from_guest(buf.begin(), argp, size)) {
+                ret = ioctl(sub_type()->get_host_fd(fd), request, argp);
+                if (ret == -1) {
+                    ret = -errno;
+                }
             } else {
                 ret = -EFAULT;
             }
@@ -269,9 +419,8 @@ namespace neutron {
             Array<char> name{};
 
             if (pcb.string_copy_from_guest(pathname, name)) {
-                auto real_name = file_name_resolve(name.begin());
-
-                ret = faccessat(get_host_fd(dirfd), real_name.c_str(), mode, 0);
+                auto real_name = sub_type()->get_host_file_name(name.begin());
+                ret = faccessat(sub_type()->get_host_fd(dirfd), real_name.c_str(), mode, 0);
                 if (ret == -1) { ret = -errno; }
             } else {
                 ret = -EFAULT;
@@ -293,11 +442,15 @@ namespace neutron {
             Array<char> name{};
 
             if (pcb.string_copy_from_guest(pathname, name)) {
-                auto real_name = file_name_resolve(name.begin());
+                auto real_name = sub_type()->get_host_file_name(name.begin());
+                ret = openat(sub_type()->get_host_fd(dirfd), real_name.c_str(), flags, mode);
 
-                ret = openat(get_host_fd(dirfd), real_name.c_str(), flags, mode);
-                if (ret == -1) { ret = -errno; }
-                else { ret = get_guest_fd(ret); }
+                if (ret == -1) {
+                    ret = -errno;
+                } else {
+                    ret = sub_type()->get_guest_fd(ret);
+                    pcb.set_close_exec(ret, (flags & NEUTRON_O_CLOEXEC) == NEUTRON_O_CLOEXEC);
+                }
             } else {
                 ret = -EFAULT;
             }
@@ -315,11 +468,7 @@ namespace neutron {
         }
 
         XLenT sys_close(int fd) {
-            XLenT ret = close(get_host_fd(fd));
-
-            if (ret != 0) { ret = -errno; }
-
-            pcb.fd_map.erase(fd);
+            XLenT ret = pcb.close_fd(fd);
 
             if (debug) {
                 debug_stream << "system call: " << ret
@@ -334,16 +483,22 @@ namespace neutron {
             XLenT ret;
 
             int host_pipefd[2]{-1, -1};
+            int guest_pipefd[2]{-1, -1};
 
             ret = pipe2(host_pipefd, flags);
 
             if (ret == -1) {
                 ret = -errno;
             } else {
-                host_pipefd[0] = get_guest_fd(host_pipefd[0]);
-                host_pipefd[1] = get_guest_fd(host_pipefd[1]);
+                guest_pipefd[0] = sub_type()->get_guest_fd(host_pipefd[0]);
+                guest_pipefd[1] = sub_type()->get_guest_fd(host_pipefd[1]);
 
-                if (pcb.memory_copy_to_guest(pipefd, &host_pipefd, sizeof(host_pipefd)) != sizeof(host_pipefd)) {
+                pcb.set_close_exec(host_pipefd[0], (flags & NEUTRON_O_CLOEXEC) == NEUTRON_O_CLOEXEC);
+                pcb.set_close_exec(host_pipefd[1], (flags & NEUTRON_O_CLOEXEC) == NEUTRON_O_CLOEXEC);
+
+                if (!pcb.memory_copy_to_guest(pipefd, &guest_pipefd, sizeof(guest_pipefd))) {
+                    pcb.close_fd(guest_pipefd[0]);
+                    pcb.close_fd(guest_pipefd[1]);
                     ret = -EFAULT;
                 }
             }
@@ -359,10 +514,13 @@ namespace neutron {
         }
 
         // todo: this is different from 32 and 64
+
+        /// This function is 64 bit version for 32 bit arch. The errno is returned as usual, but the seek result,
+        /// a 64 bit number, is write to the result parameter as address.
         XLenT sys_lseek(int fd, UXLenT offset_hi, UXLenT offset_lo, UXLenT result, XLenT whence) {
             i64 offset = (static_cast<u64>(offset_hi) << 32u) + offset_lo;
 
-            i64 ret = lseek(get_host_fd(fd), offset, whence);
+            i64 ret = lseek(sub_type()->get_host_fd(fd), offset, whence);
 
             XLenT guest_ret;
 
@@ -370,8 +528,8 @@ namespace neutron {
                 ret = -errno;
                 guest_ret = -errno;
             } else {
-                if (pcb.memory_copy_to_guest(result, &ret, sizeof(ret)) != sizeof(ret)) {
-                    ret = -errno;
+                if (!pcb.memory_copy_to_guest(result, &ret, sizeof(ret))) {
+                    ret = -EFAULT;
                     guest_ret = -EFAULT;
                 } else {
                     guest_ret = 0;
@@ -395,18 +553,23 @@ namespace neutron {
             std::vector<::iovec> vec{};
 
             if (pcb.memory_get_vector(addr, size, riscv_isa::W_BIT, vec)) {
-                ret = readv(get_host_fd(fd), vec.data(), vec.size());
-                if (ret == -1) { ret = -errno; }
+                ret = readv(sub_type()->get_host_fd(fd), vec.data(), vec.size());
+                if (ret == -1) {
+                    ret = -errno;
+                }
             } else {
                 ret = -EFAULT;
             }
 
             if (debug) {
                 char content[11]{};
-                UXLenT read_size = std::min(10u, size);
 
-                if (pcb.memory_copy_from_guest(content, addr, read_size) != read_size) {
-                    neutron_unreachable("");
+                if (ret > 0) {
+                    UXLenT read_size = std::min(10, ret);
+
+                    if (!pcb.memory_copy_from_guest(content, addr, read_size)) {
+                        neutron_unreachable("");
+                    }
                 }
 
                 debug_stream << "system call: " << ret
@@ -425,18 +588,23 @@ namespace neutron {
             std::vector<::iovec> vec{};
 
             if (pcb.memory_get_vector(addr, size, riscv_isa::R_BIT, vec)) {
-                ret = writev(get_host_fd(fd), vec.data(), vec.size());
-                if (ret == -1) { ret = -errno; }
+                ret = writev(sub_type()->get_host_fd(fd), vec.data(), vec.size());
+                if (ret == -1) {
+                    ret = -errno;
+                }
             } else {
                 ret = -EFAULT;
             }
 
             if (debug) {
                 char content[11]{};
-                UXLenT read_size = std::min(10u, size);
 
-                if (pcb.memory_copy_from_guest(content, addr, read_size) != read_size) {
-                    neutron_unreachable("");
+                if (ret > 0) {
+                    UXLenT read_size = std::min(10, ret);
+
+                    if (!pcb.memory_copy_from_guest(content, addr, read_size)) {
+                        neutron_unreachable("");
+                    }
                 }
 
                 debug_stream << "system call: " << ret
@@ -455,9 +623,10 @@ namespace neutron {
             std::vector<::iovec> vec{};
 
             if (pcb.memory_convert_io_vec(iov, iovcnt, riscv_isa::W_BIT, vec)) {
-                ret = readv(get_host_fd(fd), vec.data(), vec.size());
-
-                if (ret == -1) { ret = -errno; }
+                ret = readv(sub_type()->get_host_fd(fd), vec.data(), vec.size());
+                if (ret == -1) {
+                    ret = -errno;
+                }
             } else {
                 ret = -EFAULT;
             }
@@ -479,9 +648,10 @@ namespace neutron {
             std::vector<::iovec> vec{};
 
             if (pcb.memory_convert_io_vec(iov, iovcnt, riscv_isa::R_BIT, vec)) {
-                ret = writev(get_host_fd(fd), vec.data(), vec.size());
-
-                if (ret == -1) { ret = -errno; }
+                ret = writev(sub_type()->get_host_fd(fd), vec.data(), vec.size());
+                if (ret == -1) {
+                    ret = -errno;
+                }
             } else {
                 ret = -EFAULT;
             }
@@ -503,14 +673,13 @@ namespace neutron {
 
             if (pcb.string_copy_from_guest(pathname, name)) {
                 Array<char> host_buf{bufsiz};
-                auto real_name = file_name_resolve(name.begin());
-
-                ret = readlinkat(get_host_fd(dirfd), real_name.data(), host_buf.begin(), bufsiz);
+                auto real_name = sub_type()->get_host_file_name(name.begin());
+                ret = readlinkat(sub_type()->get_host_fd(dirfd), real_name.data(), host_buf.begin(), bufsiz);
 
                 if (ret == -1) {
                     ret = -errno;
                 } else {
-                    if (pcb.memory_copy_to_guest(buf, host_buf.begin(), bufsiz) != bufsiz) {
+                    if (!pcb.memory_copy_to_guest(buf, host_buf.begin(), bufsiz)) {
                         ret = -EFAULT;
                     }
                 }
@@ -534,7 +703,7 @@ namespace neutron {
             struct ::stat host_buf{};
             stat guest_buf{};
 
-            XLenT ret = fstat(get_host_fd(fd), &host_buf);
+            XLenT ret = fstat(sub_type()->get_host_fd(fd), &host_buf);
 
             if (ret == 0) {
                 guest_buf.st_dev = host_buf.st_dev;
@@ -563,7 +732,7 @@ namespace neutron {
                 guest_buf.ctime.tv_nsec = host_buf.st_ctimespec.tv_nsec;
 #endif
 
-                if (pcb.memory_copy_to_guest(addr, &guest_buf, sizeof(guest_buf)) != sizeof(guest_buf)) {
+                if (!pcb.memory_copy_to_guest(addr, &guest_buf, sizeof(guest_buf))) {
                     ret = -EFAULT;
                 }
             } else {
@@ -603,7 +772,7 @@ namespace neutron {
             i32 *host_uaddr = pcb.template address<i32>(uaddr, riscv_isa::READ_WRITE);
 
             switch (futex_op) {
-                case FUTEX_WAIT_PRIVATE:
+                case NEUTRON_FUTEX_WAIT_PRIVATE:
                     if (host_uaddr == nullptr) {
                         ret = -EINVAL;
                     }
@@ -659,7 +828,7 @@ namespace neutron {
                 guest_buf.cutime = host_buf.tms_cutime;
                 guest_buf.cstime = host_buf.tms_cstime;
 
-                if (pcb.memory_copy_to_guest(buf, &guest_buf, sizeof(guest_buf)) != sizeof(guest_buf)) {
+                if (!pcb.memory_copy_to_guest(buf, &guest_buf, sizeof(guest_buf))) {
                     ret = -EFAULT;
                 }
             } else {
@@ -695,7 +864,7 @@ namespace neutron {
                 memcpy(guest_buf.machine, "riscv32",
                        std::min(sizeof(guest_buf.machine), sizeof("riscv32")));
 
-                if (pcb.memory_copy_to_guest(buf, &guest_buf, sizeof(guest_buf)) != sizeof(guest_buf)) {
+                if (!pcb.memory_copy_to_guest(buf, &guest_buf, sizeof(guest_buf))) {
                     ret = -EFAULT;
                 }
             } else {
@@ -789,7 +958,7 @@ namespace neutron {
                 guest_info.freehigh = host_info.freehigh;
                 guest_info.mem_unit = host_info.mem_unit;
 
-                if (pcb.memory_copy_to_guest(info, &guest_info, sizeof(guest_info)) != sizeof(guest_info)) {
+                if (!pcb.memory_copy_to_guest(info, &guest_info, sizeof(guest_info))) {
                     ret = -EFAULT;
                 }
             }
@@ -828,8 +997,9 @@ namespace neutron {
             return ret;
         }
 
+        /// the offset is counted in page, not byte!
         XLenT sys_mmap(UXLenT addr, UXLenT length, XLenT prot, XLenT flags, XLenT fd, UXLenT offset) {
-            XLenT ret = pcb.memory_map(addr, length, prot, flags, get_host_fd(fd), offset);
+            XLenT ret = pcb.memory_map(addr, length, prot, flags, fd, offset);
 
             if (debug) {
                 debug_stream << "system call: " << ret
@@ -860,7 +1030,7 @@ namespace neutron {
         }
 
         XLenT sys_prlimit64(XLenT pid, XLenT resource, UXLenT new_limit, UXLenT old_limit) {
-            XLenT ret;
+            XLenT ret; // todo:
 
             struct rlimit host_old_limit{};
 
@@ -871,8 +1041,7 @@ namespace neutron {
             } else {
                 struct rlimit host_new_limit{};
 
-                if (pcb.memory_copy_from_guest(&host_new_limit, new_limit,
-                                               sizeof(host_new_limit)) != sizeof(host_new_limit)) {
+                if (!pcb.memory_copy_from_guest(&host_new_limit, new_limit, sizeof(host_new_limit))) {
                     ret = -EFAULT;
                 } else {
                     ret = prlimit(pid, (__rlimit_resource) resource,
@@ -883,8 +1052,7 @@ namespace neutron {
             if (ret != 0) {
                 ret = -errno;
             } else {
-                if (pcb.memory_copy_to_guest(old_limit, &host_old_limit,
-                                             sizeof(host_old_limit)) != sizeof(host_old_limit)) {
+                if (!pcb.memory_copy_to_guest(old_limit, &host_old_limit, sizeof(host_old_limit))) {
                     ret = -EFAULT;
                 }
             }
@@ -914,10 +1082,10 @@ namespace neutron {
             statx guest_buf{};
 
             if (pcb.string_copy_from_guest(pathname, name)) {
-                auto real_name = file_name_resolve(name.begin());
+                auto real_name = sub_type()->get_host_file_name(name.begin());
 
 #if defined(__linux__)
-                ret = ::statx(get_host_fd(dirfd), real_name.c_str(), flags, mask, &host_buf);
+                ret = ::statx(sub_type()->get_host_fd(dirfd), real_name.c_str(), flags, mask, &host_buf);
 #elif defined(__APPLE__)
                 if (name.size() == 0) {
                     if ((flags & NEUTRON_AT_EMPTY_PATH) > 0) {
@@ -930,7 +1098,7 @@ namespace neutron {
                 } else if (dirfd == AT_FDCWD) {
                     ret = fstatat(AT_FDCWD, real_name.c_str(), &host_buf, 0);
                 } else {
-                    ret = fstatat(get_host_fd(dirfd), real_name.c_str(), &host_buf, 0);
+                    ret = fstatat(sub_type()->get_host_fd(dirfd), real_name.c_str(), &host_buf, 0);
                 }
 #endif
 
@@ -985,7 +1153,7 @@ namespace neutron {
                     //                    guest_buf.stx_dev_minor = host_buf.st_dev_minor;
 #endif
 
-                    if (pcb.memory_copy_to_guest(statxbuf, &guest_buf, sizeof(guest_buf)) != sizeof(guest_buf)) {
+                    if (!pcb.memory_copy_to_guest(statxbuf, &guest_buf, sizeof(guest_buf))) {
                         ret = -EFAULT;
                     }
                 } else {
@@ -1063,11 +1231,11 @@ namespace neutron {
             }
         }
 
-        bool goto_main(UXLenT addr) {
+        bool goto_main() {
             bool old_debug = debug;
             debug = false;
 
-            while (static_cast<UXLenT>(this->get_pc()) != addr) {
+            while (static_cast<UXLenT>(this->get_pc()) != this->pcb.elf_main) {
                 if (!sub_type()->visit() && !sub_type()->trap_handler()) return false;
             }
 

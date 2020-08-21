@@ -10,7 +10,7 @@
 
 #define neutron_syscall_2(func) \
     this->set_x(IntRegT::A0, func(this->get_x(IntRegT::A0), \
-                            this->get_x(IntRegT::A1)))
+                                  this->get_x(IntRegT::A1)))
 
 #define neutron_syscall_3(func) \
     this->set_x(IntRegT::A0, func(this->get_x(IntRegT::A0), \
@@ -40,35 +40,6 @@
 
 #define neutron_syscall(num, func) \
     neutron_syscall_##num(func)
-
-
-#define NEUTRON_AT_NULL             0    /* end of vector */
-#define NEUTRON_AT_IGNORE           1    /* entry should be ignored */
-#define NEUTRON_AT_EXECFD           2    /* file descriptor of program */
-#define NEUTRON_AT_PHDR             3    /* program headers for program */
-#define NEUTRON_AT_PHENT            4    /* size of program header entry */
-#define NEUTRON_AT_PHNUM            5    /* number of program headers */
-#define NEUTRON_AT_PAGESZ           6    /* system page size */
-#define NEUTRON_AT_BASE             7    /* base address of interpreter */
-#define NEUTRON_AT_FLAGS            8    /* flags */
-#define NEUTRON_AT_ENTRY            9    /* entry point of program */
-#define NEUTRON_AT_NOTELF           10   /* program is not ELF */
-#define NEUTRON_AT_UID              11   /* real uid */
-#define NEUTRON_AT_EUID             12   /* effective uid */
-#define NEUTRON_AT_GID              13   /* real gid */
-#define NEUTRON_AT_EGID             14   /* effective gid */
-#define NEUTRON_AT_PLATFORM         15   /* string identifying CPU for optimizations */
-#define NEUTRON_AT_HWCAP            16   /* arch dependent hints at CPU capabilities */
-#define NEUTRON_AT_CLKTCK           17   /* frequency at which times() increments */
-/* AT_* values 18 through 22 are reserved */
-#define NEUTRON_AT_SECURE           23   /* secure mode boolean */
-#define NEUTRON_AT_BASE_PLATFORM    24   /* string identifying real platform, may differ from AT_PLATFORM. */
-#define NEUTRON_AT_RANDOM           25   /* address of 16 random bytes */
-#define NEUTRON_AT_HWCAP2           26   /* extension of AT_HWCAP */
-
-#define NEUTRON_AT_EXECFN           31   /* filename of program */
-#define NEUTRON_AT_SYSINFO          32
-#define NEUTRON_AT_SYSINFO_EHDR     33
 
 
 #define __ARCH_WANT_NEW_STAT
@@ -445,7 +416,6 @@ namespace neutron {
 #ifdef __ARCH_WANT_SYS_CLONE3
             clone3 = 435,
 #endif
-
             open = 1024,
             unlink = 1026,
             stat = 1038,
@@ -453,21 +423,208 @@ namespace neutron {
         };
     }
 
+    /// auxiliary vector related macros and struct
 
-#define NEUTRON_MAP_GROWSDOWN       0x00100     /* Stack-like segment. */
-#define NEUTRON_MAP_DENYWRITE       0x00800     /* ETXTBSY. */
-#define NEUTRON_MAP_EXECUTABLE      0x01000     /* Mark it as an executable. */
-#define NEUTRON_MAP_LOCKED          0x02000     /* Lock the mapping. */
-#define NEUTRON_MAP_NORESERVE       0x04000     /* Don't check for reservations. */
-#define NEUTRON_MAP_POPULATE        0x08000     /* Populate (prefault) pagetables. */
-#define NEUTRON_MAP_NONBLOCK        0x10000     /* Do not block on IO. */
-#define NEUTRON_MAP_STACK           0x20000     /* Allocation is for a stack. */
-#define NEUTRON_MAP_HUGETLB         0x40000     /* Create huge page mapping. */
-#define NEUTRON_MAP_SYNC            0x80000     /* Perform synchronous page faults for the mapping. */
-#define NEUTRON_MAP_FIXED_NOREPLACE 0x100000    /* MAP_FIXED but do not unmap */
+#define NEUTRON_AT_NULL             0       // end of vector
+#define NEUTRON_AT_IGNORE           1       // entry should be ignored
+#define NEUTRON_AT_EXECFD           2       // file descriptor of program
+#define NEUTRON_AT_PHDR             3       // program headers for program
+#define NEUTRON_AT_PHENT            4       // size of program header entry
+#define NEUTRON_AT_PHNUM            5       // number of program headers
+#define NEUTRON_AT_PAGESZ           6       // system page size
+#define NEUTRON_AT_BASE             7       // base address of interpreter
+#define NEUTRON_AT_FLAGS            8       // flags
+#define NEUTRON_AT_ENTRY            9       // entry point of program
+#define NEUTRON_AT_NOTELF           10      // program is not ELF
+#define NEUTRON_AT_UID              11      // real uid
+#define NEUTRON_AT_EUID             12      // effective uid
+#define NEUTRON_AT_GID              13      // real gid
+#define NEUTRON_AT_EGID             14      // effective gid
+#define NEUTRON_AT_PLATFORM         15      // string identifying CPU for optimizations
+#define NEUTRON_AT_HWCAP            16      // arch dependent hints at CPU capabilities
+#define NEUTRON_AT_CLKTCK           17      // frequency at which times() increments
+// AT_* values 18 through 22 are reserved
+#define NEUTRON_AT_SECURE           23      // secure mode boolean
+#define NEUTRON_AT_BASE_PLATFORM    24      // string identifying real platform, may differ from AT_PLATFORM.
+#define NEUTRON_AT_RANDOM           25      // address of 16 random bytes
+#define NEUTRON_AT_HWCAP2           26      // extension of AT_HWCAP
 
-#define NEUTRON_AT_EMPTY_PATH       0x1000      /* Allow empty relative pathname. */
+#define NEUTRON_AT_EXECFN           31      // filename of program
+#define NEUTRON_AT_SYSINFO          32
+#define NEUTRON_AT_SYSINFO_EHDR     33
+#define NEUTRON_AT_EMPTY_PATH       0x1000      // Allow empty relative pathname.
 
+    /// fstat related macro
+
+#define NEUTRON_F_DUPFD             0        // Duplicate file descriptor.
+#define NEUTRON_F_GETFD             1        // Get file descriptor flags.
+#define NEUTRON_F_SETFD             2        // Set file descriptor flags.
+#define NEUTRON_F_GETFL             3        // Get file status flags.
+#define NEUTRON_F_SETFL             4        // Set file status flags.
+#define NEUTRON_F_GETLK             5        // Get record locking info.
+#define NEUTRON_F_SETLK             6        // Set record locking info (non-blocking).
+#define NEUTRON_F_SETLKW            7        // Set record locking info (blocking).
+#define NEUTRON_F_SETOWN            8
+#define NEUTRON_F_GETOWN            9
+#define NEUTRON_F_SETSIG            10      // Set number of signal to be sent.
+#define NEUTRON_F_GETSIG            11      // Get number of signal to be sent.
+#define NEUTRON_F_GETLK64           12        // Get record locking info.
+#define NEUTRON_F_SETLK64           13        // Set record locking info (non-blocking).
+#define NEUTRON_F_SETLKW64          14        // Set record locking info (blocking).
+#define NEUTRON_F_SETOWN_EX         15      // Get owner (thread receiving SIGIO).
+#define NEUTRON_F_GETOWN_EX         16      // Set owner (thread receiving SIGIO).
+#define NEUTRON_F_OFD_GETLK         36
+#define NEUTRON_F_OFD_SETLK         37
+#define NEUTRON_F_OFD_SETLKW        38
+#define NEUTRON_F_SETLEASE          1024    // Set a lease.
+#define NEUTRON_F_GETLEASE          1025    // Enquire what lease is active.
+#define NEUTRON_F_NOTIFY            1026    // Request notifications on a directory.
+#define NEUTRON_F_DUPFD_CLOEXEC     1030    // Duplicate file descriptor with close-on-exit set.
+#define NEUTRON_F_SETPIPE_SZ        1031    // Set pipe page size array.
+#define NEUTRON_F_GETPIPE_SZ        1032    // Set pipe page size array.
+#define NEUTRON_F_ADD_SEALS         1033    // Add seals to file.
+#define NEUTRON_F_GET_SEALS         1034    // Get seals for file.
+// Set / get write life time hints.  
+#define NEUTRON_F_GET_RW_HINT       1035
+#define NEUTRON_F_SET_RW_HINT       1036
+#define NEUTRON_F_GET_FILE_RW_HINT  1037
+#define NEUTRON_F_SET_FILE_RW_HINT  1038
+// For F_[GET|SET]FD.
+#define NEUTRON_FD_CLOEXEC          1       // Actually anything with low bit set goes
+
+    struct flock {
+        i16 l_type;     // Type of lock: F_RDLCK, F_WRLCK, or F_UNLCK.
+        i16 l_whence;   // Where `l_start' is relative to (like `lseek').
+        i32 l_start;    // Offset where the lock begins.
+        i32 l_len;      // Size of the locked area; zero means until EOF.
+        i32 l_pid;      // Process holding the lock.
+    };
+
+    struct flock64 {
+        i16 l_type;     // Type of lock: F_RDLCK, F_WRLCK, or F_UNLCK.
+        i16 l_whence;   // Where `l_start' is relative to (like `lseek').
+        i64 l_start;    // Offset where the lock begins.
+        i64 l_len;      // Size of the locked area; zero means until EOF.
+        i32 l_pid;      // Process holding the lock.
+    };
+
+
+    
+    struct f_owner_ex {
+        enum pid_type {
+            F_OWNER_TID = 0,		        // Kernel thread.
+            F_OWNER_PID,		            // Process.
+            F_OWNER_PGRP,		            // Process group.
+            F_OWNER_GID = F_OWNER_PGRP      // Alternative, obsolete name.
+        };
+
+        pid_type type;
+        i32 pid;
+    };
+
+
+    /// open, pipe2 related macro
+
+#define NEUTRON_O_WRONLY        01
+#define NEUTRON_O_RDWR          02
+#define NEUTRON_O_CREAT         0100                                // Not fcntl.
+#define NEUTRON_O_EXCL          0200                                // Not fcntl.
+#define NEUTRON_O_NOCTTY        0400                                // Not fcntl.
+#define NEUTRON_O_TRUNC         01000                               // Not fcntl.
+#define NEUTRON_O_APPEND        02000
+#define NEUTRON_O_NONBLOCK      04000
+#define NEUTRON_O_DSYNC         010000                              // Synchronize data.
+#define NEUTRON_O_ASYNC         020000
+#define NEUTRON_O_DIRECT        040000                              // Direct disk access.
+#define NEUTRON_O_LARGEFILE     0100000
+#define NEUTRON_O_DIRECTORY     0200000                             // Must be a directory.
+#define NEUTRON_O_NOFOLLOW      0400000                             // Do not follow links.
+#define NEUTRON_O_NOATIME       01000000                            // Do not set atime.
+#define NEUTRON_O_CLOEXEC       02000000                            // Set close_on_exec.
+#define NEUTRON_O_SYNC          04010000
+#define NEUTRON_O_PATH          010000000                           // Resolve pathname but do not open file.
+#define NEUTRON_O_TMPFILE       (020000000 | NEUTRON_O_DIRECTORY)   // Atomically create nameless file.
+
+    /// lseek related macro
+
+#define NEUTRON_SEEK_SET        0       // Seek from beginning of file.
+#define NEUTRON_SEEK_CUR        1       // Seek from current position.
+#define NEUTRON_SEEK_END        2       // Seek from end of file.
+#define NEUTRON_SEEK_DATA       3       // Seek to next data.  
+#define NEUTRON_SEEK_HOLE       4       // Seek to next hole.  
+
+    /// stat related struct
+
+    struct stat {
+        struct timespec {
+            u32 tv_sec;
+            u32 tv_nsec;
+        };
+
+        u64 st_dev;                 // Device.  
+        u32 st_ino;                 // File serial number. 
+        u32 __st_ino_pad;
+        u32 st_mode;                // File mode.  
+        u32 st_nlink;               // Link count.  
+        u32 st_uid;                 // User ID of the file's owner. 
+        u32 st_gid;                 // Group ID of the file's group.
+        u64 st_rdev;                // Device number, if device.  
+        u64 __pad1;
+        u32 st_size;                // Size of file, in bytes. 
+        u32 __st_size_pad;
+        u32 st_blksize;             // Optimal block size for I/O.  
+        u32 __pad2;
+        u32 st_blocks;              // 512-byte blocks 
+        u32 __st_blocks_pad;
+        timespec atime;
+        timespec mtime;             // Time of last modification.  
+        timespec ctime;             // Time of last status change.  
+        u32 __glibc_reserved[2];
+    };
+
+    /// futex related macros
+
+#define NEUTRON_FUTEX_WAIT                      0
+#define NEUTRON_FUTEX_WAKE                      1
+#define NEUTRON_FUTEX_FD                        2
+#define NEUTRON_FUTEX_REQUEUE                   3
+#define NEUTRON_FUTEX_CMP_REQUEUE               4
+#define NEUTRON_FUTEX_WAKE_OP                   5
+#define NEUTRON_FUTEX_LOCK_PI                   6
+#define NEUTRON_FUTEX_UNLOCK_PI                 7
+#define NEUTRON_FUTEX_TRYLOCK_PI                8
+#define NEUTRON_FUTEX_WAIT_BITSET               9
+#define NEUTRON_FUTEX_WAKE_BITSET               10
+#define NEUTRON_FUTEX_WAIT_REQUEUE_PI           11
+#define NEUTRON_FUTEX_CMP_REQUEUE_PI            12
+
+#define NEUTRON_FUTEX_PRIVATE_FLAG              128
+#define NEUTRON_FUTEX_CLOCK_REALTIME            256
+#define NEUTRON_FUTEX_CMD_MASK                  ~(NEUTRON_FUTEX_PRIVATE_FLAG | NEUTRON_FUTEX_CLOCK_REALTIME)
+
+#define NEUTRON_FUTEX_WAIT_PRIVATE              (NEUTRON_FUTEX_WAIT | NEUTRON_FUTEX_PRIVATE_FLAG)
+#define NEUTRON_FUTEX_WAKE_PRIVATE              (NEUTRON_FUTEX_WAKE | NEUTRON_FUTEX_PRIVATE_FLAG)
+#define NEUTRON_FUTEX_REQUEUE_PRIVATE           (NEUTRON_FUTEX_REQUEUE | NEUTRON_FUTEX_PRIVATE_FLAG)
+#define NEUTRON_FUTEX_CMP_REQUEUE_PRIVATE       (NEUTRON_FUTEX_CMP_REQUEUE | NEUTRON_FUTEX_PRIVATE_FLAG)
+#define NEUTRON_FUTEX_WAKE_OP_PRIVATE           (NEUTRON_FUTEX_WAKE_OP | NEUTRON_FUTEX_PRIVATE_FLAG)
+#define NEUTRON_FUTEX_LOCK_PI_PRIVATE           (NEUTRON_FUTEX_LOCK_PI | NEUTRON_FUTEX_PRIVATE_FLAG)
+#define NEUTRON_FUTEX_UNLOCK_PI_PRIVATE         (NEUTRON_FUTEX_UNLOCK_PI | NEUTRON_FUTEX_PRIVATE_FLAG)
+#define NEUTRON_FUTEX_TRYLOCK_PI_PRIVATE        (NEUTRON_FUTEX_TRYLOCK_PI | NEUTRON_FUTEX_PRIVATE_FLAG)
+#define NEUTRON_FUTEX_WAIT_BITSET_PRIVATE       (NEUTRON_FUTEX_WAIT_BITSET | NEUTRON_FUTEX_PRIVATE_FLAG)
+#define NEUTRON_FUTEX_WAKE_BITSET_PRIVATE       (NEUTRON_FUTEX_WAKE_BITSET | NEUTRON_FUTEX_PRIVATE_FLAG)
+#define NEUTRON_FUTEX_WAIT_REQUEUE_PI_PRIVATE   (NEUTRON_FUTEX_WAIT_REQUEUE_PI | NEUTRON_FUTEX_PRIVATE_FLAG)
+#define NEUTRON_FUTEX_CMP_REQUEUE_PI_PRIVATE    (NEUTRON_FUTEX_CMP_REQUEUE_PI | NEUTRON_FUTEX_PRIVATE_FLAG)
+
+    /// time related macros and struct
+
+    struct tms {
+        u32 utime;
+        u32 stime;
+        u32 cutime;
+        u32 cstime;
+    };
+
+    /// uname related macros and struct
 
     struct utsname {
         static constexpr usize UTSNAME_LENGTH = 65;
@@ -480,30 +637,57 @@ namespace neutron {
         char domainname[UTSNAME_LENGTH];
     };
 
-    struct stat {
-        struct timespec {
-            u32 tv_sec;
-            u32 tv_nsec;
-        };
+    /// sysinfo related macros and struct
 
-        u32 st_dev;                 /* Device.  */
-        u32 st_ino;                 /* File serial number. */
-        u32 st_mode;                /* File mode.  */
-        u32 st_nlink;               /* Link count.  */
-        u32 st_uid;                 /* User ID of the file's owner. */
-        u32 st_gid;                 /* Group ID of the file's group.*/
-        u32 st_rdev;                /* Device number, if device.  */
-        u32 __pad1;
-        u32 st_size;                /* Size of file, in bytes. */
-        u32 st_blksize;             /* Optimal block size for I/O.  */
-        u32 __pad2;
-        u32 st_blocks;              /* 512-byte blocks */
-        timespec atime;
-        timespec mtime;             /* Time of last modification.  */
-        timespec ctime;             /* Time of last status change.  */
-        u32 __glibc_reserved[2];
-
+    struct sysinfo {
+        i32 uptime;     // Seconds since boot
+        u32 loads[3];   // 1, 5, and 15 minute load averages
+        u32 totalram;   // Total usable main memory size
+        u32 freeram;    // Available memory size
+        u32 sharedram;  // Amount of shared memory
+        u32 bufferram;  // Memory used by buffers
+        u32 totalswap;  // Total swap space size
+        u32 freeswap;   // Swap space still available
+        u16 procs;      // Number of current processes
+        u16 __pad1;
+        u32 totalhigh;  // Total high memory size
+        u32 freehigh;   // Available high memory size
+        u32 mem_unit;   // Memory unit size in bytes 
+        char __pad2[20 - 4 * sizeof(u32)];
     };
+
+    /// mmap related macros and struct
+
+#define NEUTRON_PROT_READ           0x1         // Page can be read.
+#define NEUTRON_PROT_WRITE          0x2         // Page can be written.
+#define NEUTRON_PROT_EXEC           0x4         // Page can be executed.
+#define NEUTRON_PROT_NONE           0x0         // Page can not be accessed.
+#define NEUTRON_PROT_GROWSDOWN      0x01000000  // Extend change to start of growsdown vma (mprotect only).
+#define NEUTRON_PROT_GROWSUP        0x02000000  // Extend change to start of growsup vma (mprotect only).
+
+#define NEUTRON_MAP_FILE            0
+#define NEUTRON_MAP_SHARED          0x01        // Share changes.
+#define NEUTRON_MAP_PRIVATE         0x02        // Changes are private.
+#define NEUTRON_MAP_SHARED_VALIDATE 0x03        // Share changes and validate extension flags.
+#define NEUTRON_MAP_TYPE            0x0f        // Mask for type of mapping.
+#define NEUTRON_MAP_FIXED           0x10        // Interpret addr exactly.
+#define NEUTRON_MAP_ANONYMOUS       0x20        // Don't use a file.
+#define NEUTRON_MAP_GROWSDOWN       0x00100     // Stack-like segment.
+#define NEUTRON_MAP_DENYWRITE       0x00800     // ETXTBSY.
+#define NEUTRON_MAP_EXECUTABLE      0x01000     // Mark it as an executable.
+#define NEUTRON_MAP_LOCKED          0x02000     // Lock the mapping.
+#define NEUTRON_MAP_NORESERVE       0x04000     // Don't check for reservations.
+#define NEUTRON_MAP_POPULATE        0x08000     // Populate (prefault) pagetables.
+#define NEUTRON_MAP_NONBLOCK        0x10000     // Do not block on IO.
+#define NEUTRON_MAP_STACK           0x20000     // Allocation is for a stack.
+#define NEUTRON_MAP_HUGETLB         0x40000     // Create huge page mapping.
+#define NEUTRON_MAP_SYNC            0x80000     // Perform synchronous page faults for the mapping.
+#define NEUTRON_MAP_FIXED_NOREPLACE 0x100000    // MAP_FIXED but do not unmap
+// When MAP_HUGETLB is set bits [26:31] encode the log2 of the huge page size.
+#define NEUTRON_MAP_HUGE_SHIFT      26
+#define NEUTRON_MAP_HUGE_MASK       0x3f
+
+    /// statx related struct
 
     struct statx {
         struct statx_timestamp {
@@ -520,7 +704,7 @@ namespace neutron {
         u32 stx_gid;
         u16 stx_mode;
         u16 __statx_pad1[1];
-        u16 stx_ino;
+        u64 stx_ino;
         u64 stx_size;
         u64 stx_blocks;
         u64 stx_attributes_mask;
@@ -535,62 +719,9 @@ namespace neutron {
         u64 __statx_pad2[14];
     };
 
-    struct sysinfo {
-        i32 uptime;             /* Seconds since boot */
-        u32 loads[3];  /* 1, 5, and 15 minute load averages */
-        u32 totalram;  /* Total usable main memory size */
-        u32 freeram;   /* Available memory size */
-        u32 sharedram; /* Amount of shared memory */
-        u32 bufferram; /* Memory used by buffers */
-        u32 totalswap; /* Total swap space size */
-        u32 freeswap;  /* Swap space still available */
-        u16 procs;    /* Number of current processes */
-        u32 totalhigh; /* Total high memory size */
-        u32 freehigh;  /* Available high memory size */
-        u32 mem_unit;   /* Memory unit size in bytes */
-        u8 _padding[8];
-        /* Padding to 64 bytes */
-    };
+    /// debug struct from dynamic loader
 
-    struct tms {
-        u32 utime;
-        u32 stime;
-        u32 cutime;
-        u32 cstime;
-    };
-
-#define FUTEX_WAIT                      0
-#define FUTEX_WAKE                      1
-#define FUTEX_FD                        2
-#define FUTEX_REQUEUE                   3
-#define FUTEX_CMP_REQUEUE               4
-#define FUTEX_WAKE_OP                   5
-#define FUTEX_LOCK_PI                   6
-#define FUTEX_UNLOCK_PI                 7
-#define FUTEX_TRYLOCK_PI                8
-#define FUTEX_WAIT_BITSET               9
-#define FUTEX_WAKE_BITSET               10
-#define FUTEX_WAIT_REQUEUE_PI           11
-#define FUTEX_CMP_REQUEUE_PI            12
-
-#define FUTEX_PRIVATE_FLAG              128
-#define FUTEX_CLOCK_REALTIME            256
-#define FUTEX_CMD_MASK                  ~(FUTEX_PRIVATE_FLAG | FUTEX_CLOCK_REALTIME)
-
-#define FUTEX_WAIT_PRIVATE              (FUTEX_WAIT | FUTEX_PRIVATE_FLAG)
-#define FUTEX_WAKE_PRIVATE              (FUTEX_WAKE | FUTEX_PRIVATE_FLAG)
-#define FUTEX_REQUEUE_PRIVATE           (FUTEX_REQUEUE | FUTEX_PRIVATE_FLAG)
-#define FUTEX_CMP_REQUEUE_PRIVATE       (FUTEX_CMP_REQUEUE | FUTEX_PRIVATE_FLAG)
-#define FUTEX_WAKE_OP_PRIVATE           (FUTEX_WAKE_OP | FUTEX_PRIVATE_FLAG)
-#define FUTEX_LOCK_PI_PRIVATE           (FUTEX_LOCK_PI | FUTEX_PRIVATE_FLAG)
-#define FUTEX_UNLOCK_PI_PRIVATE         (FUTEX_UNLOCK_PI | FUTEX_PRIVATE_FLAG)
-#define FUTEX_TRYLOCK_PI_PRIVATE        (FUTEX_TRYLOCK_PI | FUTEX_PRIVATE_FLAG)
-#define FUTEX_WAIT_BITSET_PRIVATE       (FUTEX_WAIT_BITSET | FUTEX_PRIVATE_FLAG)
-#define FUTEX_WAKE_BITSET_PRIVATE       (FUTEX_WAKE_BITSET | FUTEX_PRIVATE_FLAG)
-#define FUTEX_WAIT_REQUEUE_PI_PRIVATE   (FUTEX_WAIT_REQUEUE_PI | FUTEX_PRIVATE_FLAG)
-#define FUTEX_CMP_REQUEUE_PI_PRIVATE    (FUTEX_CMP_REQUEUE_PI | FUTEX_PRIVATE_FLAG)
-
-    template <typename UXLenT>
+    template<typename UXLenT>
     struct DebugInfo {
         int version;
         UXLenT map;
@@ -603,7 +734,7 @@ namespace neutron {
         UXLenT ld_base;
     };
 
-    template <typename UXLenT>
+    template<typename UXLenT>
     struct DebugMap {
         UXLenT addr;
         UXLenT name;

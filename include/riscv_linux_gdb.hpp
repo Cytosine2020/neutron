@@ -145,7 +145,9 @@ namespace neutron {
         bool break_point_handler(neutron_unused UXLenT addr) { return gdb_break_point(); }
 
         void start(u32 port) {
-            if (!this->goto_main(this->pcb.elf_main) || !gdb.gdb_connect(port) || !gdb_handler()) { return; }
+            if (!this->goto_main()) { return; }
+
+            if (!gdb.gdb_connect(port) || !gdb_handler()) { return; }
 
             while (sub_type()->visit() || sub_type()->trap_handler()) {}
 

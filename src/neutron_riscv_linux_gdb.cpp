@@ -4,6 +4,8 @@
 using namespace neutron;
 
 
+extern char **environ;
+
 class Core : public LinuxGDBHart<Core> {
 public:
     Core(UXLenT hart_id, LinuxProgram<> &mem) : LinuxGDBHart<Core>{hart_id, mem} {}
