@@ -19,9 +19,6 @@ namespace neutron {
         std::map<UXLenT, std::pair<UXLenT, UXLenT>> block;
         UXLenT inst_offset;
         riscv_isa::ILenT inst_buffer;
-        bool auipc;
-        usize auipc_reg;
-        usize auipc_val;
 
         static bool is_link(usize reg) { return reg == 1 || reg == 5; }
 
@@ -34,7 +31,7 @@ namespace neutron {
             }
         }
 
-        BlockVisitor() : block{}, inst_offset{0}, inst_buffer{0}, auipc{false}, auipc_reg{0}, auipc_val{0} {}
+        BlockVisitor() : block{}, inst_offset{0}, inst_buffer{0} {}
 
         Graph<UXLenT> blocking(UXLenT guest, void *host, usize size) {
             usize offset = 0;
@@ -87,7 +84,6 @@ namespace neutron {
 
         template<typename InstT>
         RetT log_branch(InstT *inst) {
-            auipc = false;
             block.emplace(inst_offset, std::make_pair(inst_offset + InstT::INST_WIDTH, inst_offset + inst->get_imm()));
             return InstT::INST_WIDTH;
         }
@@ -116,27 +112,13 @@ namespace neutron {
     BlockVisitor::RetT BlockVisitor::_return_inst_len<InstT>::inner(
             neutron_unused BlockVisitor *self, neutron_unused InstT *inst
     ) {
-        self->auipc = false;
         return InstT::INST_WIDTH;
-    }
-
-    template<>
-    BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::AUIPCInst>::inner(
-            BlockVisitor *self, riscv_isa::AUIPCInst *inst
-    ) {
-        self->auipc = true;
-        self->auipc_reg = inst->get_rd();
-        self->auipc_val = self->inst_offset + inst->get_imm();
-
-        return riscv_isa::AUIPCInst::INST_WIDTH;
     }
 
     template<>
     BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::JALInst>::inner(
             BlockVisitor *self, riscv_isa::JALInst *inst
     ) {
-        self->auipc = false;
-
         if (is_link(inst->get_rd())) {
             // this is a function call
             UXLenT next_inst = self->inst_offset + riscv_isa::JALInst::INST_WIDTH;
@@ -168,9 +150,6 @@ namespace neutron {
             self->block.emplace(self->inst_offset, std::make_pair(0, 0));
 //            }
         }
-
-        self->auipc = false;
-
         return riscv_isa::JALRInst::INST_WIDTH;
     }
 

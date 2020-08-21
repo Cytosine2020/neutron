@@ -29,8 +29,8 @@
 
 
 namespace neutron {
-    template<typename SubT, typename xlen = typename riscv_isa::xlen_trait>
-    class LinuxHart : public riscv_isa::Hart<SubT> {
+    template<typename SubT, typename xlen>
+    class LinuxHart : public riscv_isa::Hart<SubT, xlen> {
     private:
         SubT *sub_type() { return static_cast<SubT *>(this); }
 
@@ -40,15 +40,17 @@ namespace neutron {
         bool debug;
 
     public:
-        using RetT = typename riscv_isa::Hart<SubT>::RetT;
-        using XLenT = typename riscv_isa::Hart<SubT>::XLenT;
-        using UXLenT = typename riscv_isa::Hart<SubT>::UXLenT;
-        using IntRegT = typename riscv_isa::Hart<SubT>::IntRegT;
-        using CSRRegT = typename riscv_isa::Hart<SubT>::CSRRegT;
+        using SuperT = riscv_isa::Hart<SubT, xlen>;
+
+        using RetT = typename SuperT::RetT;
+        using XLenT = typename SuperT::XLenT;
+        using UXLenT = typename SuperT::UXLenT;
+        using IntRegT = typename SuperT::IntRegT;
+        using CSRRegT = typename SuperT::CSRRegT;
 
         LinuxHart(UXLenT hart_id, LinuxProgram<xlen> &mem,
                   bool debug = false, std::ostream &debug_stream = std::cerr) :
-                riscv_isa::Hart<SubT>{hart_id, mem.pc, mem.int_reg}, pcb{mem},
+                SuperT{hart_id, mem.pc, mem.int_reg}, pcb{mem},
                 debug_stream{debug_stream}, debug{debug} {
             this->cur_level = riscv_isa::USER_MODE;
         }
@@ -861,8 +863,8 @@ namespace neutron {
                        std::min(sizeof(guest_buf.release), sizeof(host_buf.release)));
                 memcpy(guest_buf.version, host_buf.version,
                        std::min(sizeof(guest_buf.version), sizeof(host_buf.version)));
-                memcpy(guest_buf.machine, "riscv32",
-                       std::min(sizeof(guest_buf.machine), sizeof("riscv32")));
+                memcpy(guest_buf.machine, pcb.platform_string,
+                       std::min(sizeof(guest_buf.machine), sizeof(pcb.platform_string)));
 
                 if (!pcb.memory_copy_to_guest(buf, &guest_buf, sizeof(guest_buf))) {
                     ret = -EFAULT;

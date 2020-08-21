@@ -27,7 +27,7 @@ namespace neutron {
         AuxiliaryEntry(UXLenT type, UXLenT value) : type{type}, value{value} {}
     };
 
-    template<typename xlen=riscv_isa::xlen_trait>
+    template<typename xlen>
     class LinuxProgram {
     private:
         using XLenT = typename xlen::XLenT;
@@ -49,6 +49,8 @@ namespace neutron {
             UXLenT iov_base;        /* Starting address */
             UXLenT iov_len;         /* Number of bytes to transfer */
         };
+
+        static const char *platform_string;
 
     private:
         struct MemArea {
@@ -99,7 +101,7 @@ namespace neutron {
             return PROT_NONE;
         }
 
-        bool load_section(elf::MappedFileVisitor &visitor, elf32::ExecutableHeader *loadable, XLenT shift) {
+        bool load_section(elf::MappedFileVisitor &visitor, elf::ExecutableHeader<UXLenT> *loadable, XLenT shift) {
             if (MEM_END <= loadable->mem_size || loadable->virtual_address >= MEM_END - loadable->mem_size)
                 return false;
 
@@ -201,18 +203,17 @@ namespace neutron {
             // auxiliary vector
 
             // platform
-            const char *string = "riscv32";
-            usize len = strlen(string) + 1;
+            usize len = strlen(platform_string) + 1;
 
             stack_ptr -= len;
-            if (!memory_copy_to_guest(stack_ptr, string, len)) { return false; }
+            if (!memory_copy_to_guest(stack_ptr, platform_string, len)) { return false; }
             auxv.emplace_back(NEUTRON_AT_PLATFORM, stack_ptr);
 
             // random
-            std::default_random_engine engine{static_cast<u32>(clock())};
+            std::random_device engine{};
             std::uniform_int_distribution<UXLenT> dist{};
             UXLenT rand = dist(engine);
-            string = reinterpret_cast<const char *>(&rand);
+            const char *string = reinterpret_cast<const char *>(&rand);
             len = sizeof(rand);
 
             stack_ptr -= len;
@@ -245,7 +246,7 @@ namespace neutron {
 
             // argc
             stack_ptr -= xlen::XLEN_BYTE;
-            auto ptr = address<u32>(stack_ptr, riscv_isa::READ_WRITE);
+            auto ptr = address<UXLenT>(stack_ptr, riscv_isa::READ_WRITE);
             if (ptr == nullptr) return false;
             *ptr = argc;
 
@@ -254,11 +255,12 @@ namespace neutron {
             return true;
         }
 
-        XLenT load_program(elf::MappedFileVisitor &visitor, elf32::ELFHeader *header) {
-            std::vector<elf32::ExecutableHeader *> elf_load{};
+        XLenT load_program(elf::MappedFileVisitor &visitor, elf::ELFHeader<UXLenT> *header) {
+            std::vector<elf::ExecutableHeader<UXLenT> *> elf_load{};
 
             for (auto &program: header->programs(visitor)) {
-                auto *loadable = elf32::ProgramHeader::cast<elf32::ExecutableHeader>(&program, visitor);
+                auto *loadable = elf::ProgramHeader<UXLenT>::template
+                cast<elf::ExecutableHeader<UXLenT>>(&program, visitor);
                 if (loadable != nullptr) elf_load.emplace_back(loadable);
             }
 
@@ -277,7 +279,7 @@ namespace neutron {
 
             XLenT shift;
 
-            if (header->file_type == elf32::ELFHeader::SHARED) {
+            if (header->file_type == elf::ELFHeader<UXLenT>::SHARED) {
                 shift = MMAP_BEGIN - elf_start; // todo: rand
             } else {
                 shift = 0; // todo: cannot relocate
@@ -474,28 +476,29 @@ namespace neutron {
             auto elf_visitor = elf::MappedFileVisitor::open_elf(elf_name);
             if (elf_visitor.get_fd() == -1) neutron_abort("Failed to open ELF file!");
 
-            auto *elf_header = elf32::ELFHeader::read(elf_visitor);
-            if (elf_header == nullptr || (elf_header->file_type != elf32::ELFHeader::EXECUTABLE &&
-                                          elf_header->file_type != elf32::ELFHeader::SHARED)) {
+            auto *elf_header = elf::ELFHeader<UXLenT>::read(elf_visitor);
+            if (elf_header == nullptr || (elf_header->file_type != elf::ELFHeader<UXLenT>::EXECUTABLE &&
+                                          elf_header->file_type != elf::ELFHeader<UXLenT>::SHARED)) {
                 return false;
             }
 
             /// get first interpreter files
 
             elf::MappedFileVisitor int_visitor{};
-            elf32::ELFHeader *int_header = nullptr;
+            elf::ELFHeader<UXLenT> *int_header = nullptr;
 
             for (auto &program: elf_header->programs(elf_visitor)) {
-                auto *inter_path_name = elf32::ProgramHeader::cast<elf32::InterPathHeader>(&program, elf_visitor);
+                auto *inter_path_name = elf::ProgramHeader<UXLenT>::template
+                        cast<elf::InterPathHeader<UXLenT>>(&program, elf_visitor);
                 if (inter_path_name == nullptr) continue;
 
                 auto lib_path = sysroot + inter_path_name->get_path_name(elf_visitor);
                 int_visitor = elf::MappedFileVisitor::open_elf(lib_path.c_str());
                 if (int_visitor.get_fd() == -1) return false;
 
-                int_header = elf32::ELFHeader::read(int_visitor);
-                if (int_header == nullptr || (int_header->file_type != elf32::ELFHeader::EXECUTABLE &&
-                                              int_header->file_type != elf32::ELFHeader::SHARED)) {
+                int_header = elf::ELFHeader<UXLenT>::read(int_visitor);
+                if (int_header == nullptr || (int_header->file_type != elf::ELFHeader<UXLenT>::EXECUTABLE &&
+                                              int_header->file_type != elf::ELFHeader<UXLenT>::SHARED)) {
                     return false;
                 }
 
@@ -510,8 +513,10 @@ namespace neutron {
             if (elf_entry == 0) return false;
 
             // get the main function
-            auto *symtab_header = elf_header->get_section_header<elf32::SymbolTableHeader>(".symtab", elf_visitor);
-            auto *strtab_header = elf_header->get_section_header<elf32::StringTableHeader>(".strtab", elf_visitor);
+            auto *symtab_header = elf_header->template
+                    get_section_header<elf::SymbolTableHeader<UXLenT>>(".symtab", elf_visitor);
+            auto *strtab_header = elf_header->template
+                    get_section_header<elf::StringTableHeader<UXLenT>>(".strtab", elf_visitor);
             if (symtab_header == nullptr || strtab_header == nullptr) return false;
             auto symbol_table = symtab_header->get_table(elf_visitor);
             auto string_table = strtab_header->get_table(elf_visitor);
@@ -1059,6 +1064,12 @@ namespace neutron {
             for (auto &item: fd_map) { close(item.second); }
         }
     };
+
+    template<>
+    const char *LinuxProgram<riscv_isa::xlen_32_trait>::platform_string = "riscv32";
+
+    template<>
+    const char *LinuxProgram<riscv_isa::xlen_64_trait>::platform_string = "riscv64";
 }
 
 
