@@ -36,6 +36,9 @@ namespace neutron {
 
     protected:
         LinuxProgram<xlen> &pcb;
+        typename LinuxProgram<xlen>::MemoryArea execute_cache;
+        typename LinuxProgram<xlen>::MemoryArea load_cache;
+        typename LinuxProgram<xlen>::MemoryArea store_cache;
         std::ostream &debug_stream;
         bool debug;
 
@@ -50,75 +53,62 @@ namespace neutron {
 
         LinuxHart(UXLenT hart_id, LinuxProgram<xlen> &mem,
                   bool debug = false, std::ostream &debug_stream = std::cerr) :
-                SuperT{hart_id, mem.pc, mem.int_reg}, pcb{mem},
+                SuperT{hart_id, mem.pc, mem.int_reg}, pcb{mem}, execute_cache{0, 0, nullptr},
+                load_cache{0, 0, nullptr}, store_cache{0, 0, nullptr},
                 debug_stream{debug_stream}, debug{debug} {
             this->cur_level = riscv_isa::USER_MODE;
         }
 
-        template<typename ValT>
-        RetT mmu_load_int_reg(usize dest, UXLenT addr) {
-            static_assert(sizeof(ValT) <= sizeof(UXLenT), "load width exceed bit width!");
-
-            if ((addr & (sizeof(ValT) - 1)) != 0)
-                return sub_type()->internal_interrupt(riscv_isa::trap::LOAD_ACCESS_FAULT, addr);
-
-            const ValT *ptr = pcb.template address<ValT>(addr, riscv_isa::READ);
-            if (ptr == nullptr) {
-                return sub_type()->internal_interrupt(riscv_isa::trap::LOAD_PAGE_FAULT, addr);
-            } else {
-                if (dest != 0) this->set_x(dest, *ptr);
-                return true;
-            }
+        void invalid_cache() {
+            execute_cache = typename LinuxProgram<xlen>::MemoryArea{0, 0, nullptr};
+            load_cache = typename LinuxProgram<xlen>::MemoryArea{0, 0, nullptr};
+            store_cache = typename LinuxProgram<xlen>::MemoryArea{0, 0, nullptr};
         }
 
         template<typename ValT>
-        RetT mmu_store_int_reg(usize src, UXLenT addr) {
-            static_assert(sizeof(ValT) <= sizeof(UXLenT), "store width exceed bit width!");
-
-            if ((addr & (sizeof(ValT) - 1)) != 0)
-                return sub_type()->internal_interrupt(riscv_isa::trap::STORE_AMO_ACCESS_FAULT, addr);
-
-            ValT *ptr = pcb.template address<ValT>(addr, riscv_isa::READ_WRITE);
-            if (ptr == nullptr) {
-                return sub_type()->internal_interrupt(riscv_isa::trap::STORE_AMO_PAGE_FAULT, addr);
+        const ValT *address_load(UXLenT addr) {
+            if (load_cache.start <= addr && addr + sizeof(ValT) <= load_cache.end) {
+                return reinterpret_cast<ValT *>(load_cache.shift + addr);
             } else {
-                *ptr = static_cast<ValT>(this->get_x(src));
-                return true;
+                auto area = pcb.get_memory_area(addr, riscv_isa::READ);
+                if (area.start == 0) {
+                    return nullptr;
+                } else {
+                    load_cache = area;
+                    return reinterpret_cast<ValT *>(area.shift + addr);
+                }
             }
         }
-
-        template<usize offset>
-        RetT mmu_load_inst_half(UXLenT addr) {
-            /// instruction misaligned is checked in jump or branch instructions
-
-            const u16 *ptr = pcb.template address<u16>(addr + offset * sizeof(u16), riscv_isa::EXECUTE);
-            if (ptr == nullptr) {
-                return sub_type()->internal_interrupt(riscv_isa::trap::INSTRUCTION_PAGE_FAULT, addr);
-            } else {
-                memcpy(reinterpret_cast<u16 *>(&this->inst_buffer) + offset, ptr, 2);
-                return true;
-            }
-        }
-
-#if defined(__RV_EXTENSION_A__)
 
         template<typename ValT>
-        RetT mmu_store_xlen(XLenT val, XLenT addr) {
-            static_assert(sizeof(ValT) <= sizeof(UXLenT), "store width exceed bit width!");
-
-            if ((addr & (sizeof(ValT) - 1)) != 0)
-                return sub_type()->internal_interrupt(riscv_isa::trap::STORE_AMO_ACCESS_FAULT, addr);
-
-            ValT *ptr = pcb.template address<ValT>(addr, riscv_isa::READ_WRITE);
-            if (ptr == nullptr) {
-                return sub_type()->internal_interrupt(riscv_isa::trap::STORE_AMO_PAGE_FAULT, addr);
+        ValT *address_store(UXLenT addr) {
+            if (store_cache.start <= addr && addr + sizeof(ValT) <= store_cache.end) {
+                return reinterpret_cast<ValT *>(store_cache.shift + addr);
             } else {
-                *ptr = val;
-                return true;
+                auto area = pcb.get_memory_area(addr, riscv_isa::READ_WRITE);
+                if (area.start == 0) {
+                    return nullptr;
+                } else {
+                    store_cache = area;
+                    return reinterpret_cast<ValT *>(area.shift + addr);
+                }
             }
         }
 
-#endif
+        template<typename ValT>
+        const ValT *address_execute(UXLenT addr) {
+            if (execute_cache.start <= addr && addr + sizeof(ValT) <= execute_cache.end) {
+                return reinterpret_cast<ValT *>(execute_cache.shift + addr);
+            } else {
+                auto area = pcb.get_memory_area(addr, riscv_isa::EXECUTE);
+                if (area.start == 0) {
+                    return nullptr;
+                } else {
+                    execute_cache = area;
+                    return reinterpret_cast<ValT *>(area.shift + addr);
+                }
+            }
+        }
 
 #if defined(__RV_EXTENSION_ZICSR__)
 
@@ -977,6 +967,10 @@ namespace neutron {
         XLenT sys_brk(UXLenT addr) {
             XLenT ret = pcb.set_break(addr);
 
+            if (static_cast<UXLenT>(ret) == addr) {
+                invalid_cache();
+            }
+
             if (debug) {
                 debug_stream << "system call: " << ret
                              << " = brk(<addr> " << addr
@@ -986,8 +980,19 @@ namespace neutron {
             return ret;
         }
 
-        XLenT sys_munmap(UXLenT addr, XLenT length) {
-            XLenT ret = pcb.memory_unmap(addr, length);
+        XLenT sys_munmap(UXLenT addr, UXLenT length) {
+            XLenT ret;
+
+            if (addr < pcb.MEM_BEGIN || length > pcb.MEM_BEGIN ||
+                pcb.MEM_BEGIN - length < addr || addr % RISCV_PAGE_SIZE != 0) {
+                ret = -EINVAL;
+            } else {
+                ret = pcb.memory_unmap(addr, divide_ceil(length, RISCV_PAGE_SIZE) * RISCV_PAGE_SIZE);
+            }
+
+            if (ret == 0) {
+                invalid_cache();
+            }
 
             if (debug) {
                 debug_stream << "system call: " << ret
@@ -1002,6 +1007,10 @@ namespace neutron {
         /// the offset is counted in page, not byte!
         XLenT sys_mmap(UXLenT addr, UXLenT length, XLenT prot, XLenT flags, XLenT fd, UXLenT offset) {
             XLenT ret = pcb.memory_map(addr, length, prot, flags, fd, offset);
+
+            if (static_cast<UXLenT>(ret) <= static_cast<UXLenT>(-RISCV_PAGE_SIZE)) {
+                invalid_cache();
+            }
 
             if (debug) {
                 debug_stream << "system call: " << ret
@@ -1019,6 +1028,10 @@ namespace neutron {
 
         XLenT sys_mprotect(UXLenT addr, UXLenT len, XLenT prot) {
             XLenT ret = pcb.memory_protection(addr, len, prot);
+
+            if (static_cast<UXLenT>(ret) == 0) {
+                invalid_cache();
+            }
 
             if (debug) {
                 debug_stream << "system call: " << ret

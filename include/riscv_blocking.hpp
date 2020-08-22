@@ -17,6 +17,9 @@ namespace neutron {
         using UXLenT = riscv_isa::xlen_trait::UXLenT;
 
         std::map<UXLenT, std::pair<UXLenT, UXLenT>> block;
+        std::map<UXLenT, UXLenT> function_call;
+        std::unordered_map<UXLenT, usize> branch;
+        std::unordered_map<UXLenT, usize> indirect;
         UXLenT inst_offset;
         riscv_isa::ILenT inst_buffer;
 
@@ -84,7 +87,11 @@ namespace neutron {
 
         template<typename InstT>
         RetT log_branch(InstT *inst) {
-            block.emplace(inst_offset, std::make_pair(inst_offset + InstT::INST_WIDTH, inst_offset + inst->get_imm()));
+            block.emplace(inst_offset, std::make_pair(
+                    inst_offset + InstT::INST_WIDTH,
+                    inst_offset + inst->get_imm()
+            ));
+            branch.emplace(inst_offset, branch.size());
             return InstT::INST_WIDTH;
         }
 
@@ -94,7 +101,9 @@ namespace neutron {
         };
 
         template<typename InstT>
-        RetT return_inst_len(neutron_unused InstT *inst) { return _return_inst_len<InstT>::inner(this, inst); }
+        RetT return_inst_len(neutron_unused InstT *inst) {
+            return _return_inst_len<InstT>::inner(this, inst);
+        }
 
 #define _neutron_return_inst_len(NAME, name) \
         RetT visit_##name##_inst(riscv_isa::NAME##Inst *inst) { return return_inst_len(inst); }
@@ -111,20 +120,28 @@ namespace neutron {
     template<typename InstT>
     BlockVisitor::RetT BlockVisitor::_return_inst_len<InstT>::inner(
             neutron_unused BlockVisitor *self, neutron_unused InstT *inst
-    ) {
-        return InstT::INST_WIDTH;
-    }
+    ) { return InstT::INST_WIDTH; }
+//
+//    template<>
+//    BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::AUIPCInst>::inner(
+//            BlockVisitor *self, riscv_isa::AUIPCInst *inst
+//    ) {
+//        // todo: instruction fuse
+//
+//        return riscv_isa::AUIPCInst::INST_WIDTH;
+//    }
 
     template<>
     BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::JALInst>::inner(
             BlockVisitor *self, riscv_isa::JALInst *inst
     ) {
         if (is_link(inst->get_rd())) {
-            // this is a function call
+            // direct function call
             UXLenT next_inst = self->inst_offset + riscv_isa::JALInst::INST_WIDTH;
             self->block.emplace(self->inst_offset, std::make_pair(next_inst, next_inst));
+            self->function_call.emplace(self->inst_offset, self->inst_offset + inst->get_imm());
         } else {
-            // this is a determined jump
+            // direct jump
             usize target = self->inst_offset + inst->get_imm();
             self->block.emplace(self->inst_offset, std::make_pair(target, target));
         }
@@ -136,20 +153,18 @@ namespace neutron {
     BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::JALRInst>::inner(
             BlockVisitor *self, riscv_isa::JALRInst *inst
     ) {
+        self->indirect.emplace(self->inst_offset, self->indirect.size());
+
         if (is_link(inst->get_rd())) {
-            // this is a function call
+            // indirect function call
             UXLenT next_inst = self->inst_offset + riscv_isa::JALRInst::INST_WIDTH;
             self->block.emplace(self->inst_offset, std::make_pair(next_inst, next_inst));
+            self->function_call.emplace(self->inst_offset, 0);
         } else {
-//            if (self->auipc && inst->get_rs1() == self->auipc_reg) {
-//                // this is an determined long jump
-//                UXLenT next_inst = self->auipc_val + riscv_isa::JALRInst::INST_WIDTH;
-//                self->block.emplace(self->inst_offset, std::make_pair(next_inst, next_inst));
-//            } else {
-            // this is an undetermined jump, zero stands for return to caller
+            // indirect jump
             self->block.emplace(self->inst_offset, std::make_pair(0, 0));
-//            }
         }
+
         return riscv_isa::JALRInst::INST_WIDTH;
     }
 

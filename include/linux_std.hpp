@@ -508,13 +508,11 @@ namespace neutron {
         i32 l_pid;      // Process holding the lock.
     };
 
-
-    
     struct f_owner_ex {
         enum pid_type {
-            F_OWNER_TID = 0,		        // Kernel thread.
-            F_OWNER_PID,		            // Process.
-            F_OWNER_PGRP,		            // Process group.
+            F_OWNER_TID = 0,                // Kernel thread.
+            F_OWNER_PID,                    // Process.
+            F_OWNER_PGRP,                    // Process group.
             F_OWNER_GID = F_OWNER_PGRP      // Alternative, obsolete name.
         };
 
@@ -552,6 +550,14 @@ namespace neutron {
 #define NEUTRON_SEEK_END        2       // Seek from end of file.
 #define NEUTRON_SEEK_DATA       3       // Seek to next data.  
 #define NEUTRON_SEEK_HOLE       4       // Seek to next hole.  
+
+    /// iovec
+
+    template<typename xlen>
+    struct iovec {
+        typename xlen::UXLenT iov_base;        // Starting address
+        typename xlen::UXLenT iov_len;         // Number of bytes to transfer
+    };
 
     /// stat related struct
 
@@ -717,6 +723,16 @@ namespace neutron {
         u32 stx_dev_major;
         u32 stx_dev_minor;
         u64 __statx_pad2[14];
+    };
+
+    /// auxiliary entry
+
+    template<typename UXLenT>
+    struct AuxiliaryEntry {
+        UXLenT type;
+        UXLenT value;
+
+        AuxiliaryEntry(UXLenT type, UXLenT value) : type{type}, value{value} {}
     };
 
     /// debug struct from dynamic loader
