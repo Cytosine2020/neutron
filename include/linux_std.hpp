@@ -3,40 +3,40 @@
 
 
 #define neutron_syscall_0(func) \
-    this->set_x(IntRegT::A0, func())
+    sub_type()->set_x(IntRegT::A0, func())
 
 #define neutron_syscall_1(func) \
-    this->set_x(IntRegT::A0, func(this->get_x(IntRegT::A0)))
+    sub_type()->set_x(IntRegT::A0, func(sub_type()->get_x(IntRegT::A0)))
 
 #define neutron_syscall_2(func) \
-    this->set_x(IntRegT::A0, func(this->get_x(IntRegT::A0), \
-                                  this->get_x(IntRegT::A1)))
+    sub_type()->set_x(IntRegT::A0, func(sub_type()->get_x(IntRegT::A0), \
+                                        sub_type()->get_x(IntRegT::A1)))
 
 #define neutron_syscall_3(func) \
-    this->set_x(IntRegT::A0, func(this->get_x(IntRegT::A0), \
-                                  this->get_x(IntRegT::A1), \
-                                  this->get_x(IntRegT::A2)))
+    sub_type()->set_x(IntRegT::A0, func(sub_type()->get_x(IntRegT::A0), \
+                                        sub_type()->get_x(IntRegT::A1), \
+                                        sub_type()->get_x(IntRegT::A2)))
 
 #define neutron_syscall_4(func) \
-    this->set_x(IntRegT::A0, func(this->get_x(IntRegT::A0), \
-                                  this->get_x(IntRegT::A1), \
-                                  this->get_x(IntRegT::A2), \
-                                  this->get_x(IntRegT::A3)))
+    sub_type()->set_x(IntRegT::A0, func(sub_type()->get_x(IntRegT::A0), \
+                                        sub_type()->get_x(IntRegT::A1), \
+                                        sub_type()->get_x(IntRegT::A2), \
+                                        sub_type()->get_x(IntRegT::A3)))
 
 #define neutron_syscall_5(func) \
-    this->set_x(IntRegT::A0, func(this->get_x(IntRegT::A0), \
-                                  this->get_x(IntRegT::A1), \
-                                  this->get_x(IntRegT::A2), \
-                                  this->get_x(IntRegT::A3), \
-                                  this->get_x(IntRegT::A4)))
+    sub_type()->set_x(IntRegT::A0, func(sub_type()->get_x(IntRegT::A0), \
+                                        sub_type()->get_x(IntRegT::A1), \
+                                        sub_type()->get_x(IntRegT::A2), \
+                                        sub_type()->get_x(IntRegT::A3), \
+                                        sub_type()->get_x(IntRegT::A4)))
 
 #define neutron_syscall_6(func) \
-    this->set_x(IntRegT::A0, func(this->get_x(IntRegT::A0), \
-                                  this->get_x(IntRegT::A1), \
-                                  this->get_x(IntRegT::A2), \
-                                  this->get_x(IntRegT::A3), \
-                                  this->get_x(IntRegT::A4), \
-                                  this->get_x(IntRegT::A5)))
+    sub_type()->set_x(IntRegT::A0, func(sub_type()->get_x(IntRegT::A0), \
+                                        sub_type()->get_x(IntRegT::A1), \
+                                        sub_type()->get_x(IntRegT::A2), \
+                                        sub_type()->get_x(IntRegT::A3), \
+                                        sub_type()->get_x(IntRegT::A4), \
+                                        sub_type()->get_x(IntRegT::A5)))
 
 #define neutron_syscall(num, func) \
     neutron_syscall_##num(func)

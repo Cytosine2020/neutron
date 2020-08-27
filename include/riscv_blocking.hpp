@@ -13,15 +13,15 @@
 
 namespace neutron {
     class BlockVisitor : public riscv_isa::InstructionVisitor<BlockVisitor, usize> {
-    private:
+    public:
         using UXLenT = riscv_isa::xlen_trait::UXLenT;
+        using BranchMapT = std::unordered_map<UXLenT, usize>;
 
+    private:
         std::map<UXLenT, std::pair<UXLenT, UXLenT>> block;
-        std::map<UXLenT, UXLenT> function_call;
-        std::unordered_map<UXLenT, usize> branch;
-        std::unordered_map<UXLenT, usize> indirect;
+        BranchMapT &branch;
+        BranchMapT &indirect;
         UXLenT inst_offset;
-        riscv_isa::ILenT inst_buffer;
 
         static bool is_link(usize reg) { return reg == 1 || reg == 5; }
 
@@ -34,7 +34,8 @@ namespace neutron {
             }
         }
 
-        BlockVisitor() : block{}, inst_offset{0}, inst_buffer{0} {}
+        BlockVisitor(BranchMapT &branch, BranchMapT &indirect)
+                : block{}, branch{branch}, indirect{indirect}, inst_offset{0} {}
 
         Graph<UXLenT> blocking(UXLenT guest, void *host, usize size) {
             usize offset = 0;
@@ -42,7 +43,7 @@ namespace neutron {
             while (offset < size) {
                 inst_offset = guest + offset;
                 u8 *inst = static_cast<u8 *>(host) + offset;
-                usize inc = visit(reinterpret_cast<riscv_isa::Instruction *>(inst), size - offset);
+                usize inc = visit_in_memory(reinterpret_cast<riscv_isa::Instruction *>(inst), size - offset);
                 if (inc == 0) break;
                 offset += inc;
             }
@@ -60,30 +61,8 @@ namespace neutron {
             return graph;
         }
 
-        RetT visit(riscv_isa::Instruction *inst, usize length) {
-            inst_buffer = 0;
-
-            if (length < 2) return illegal_instruction(reinterpret_cast<riscv_isa::Instruction *>(&this->inst_buffer));
-            memcpy(reinterpret_cast<u8 *>(&inst_buffer) + 0, reinterpret_cast<u8 *>(inst) + 0, 2);
-
-            if ((this->inst_buffer & bits_mask<u16, 2, 0>::val) != bits_mask<u16, 2, 0>::val) {
-#if defined(__RV_EXTENSION_C__)
-                return this->visit_16(reinterpret_cast<Instruction16 *>(&this->inst_buffer));
-#else
-                return illegal_instruction(reinterpret_cast<riscv_isa::Instruction *>(&this->inst_buffer));
-#endif // defined(__RV_EXTENSION_C__)
-            } else if ((this->inst_buffer & bits_mask<u16, 5, 2>::val) != bits_mask<u16, 5, 2>::val) {
-                if (length < 4)
-                    return illegal_instruction(reinterpret_cast<riscv_isa::Instruction *>(&this->inst_buffer));
-                memcpy(reinterpret_cast<u8 *>(&inst_buffer) + 2, reinterpret_cast<u8 *>(inst) + 2, 2);
-                return this->visit_32(reinterpret_cast<riscv_isa::Instruction32 *>(&this->inst_buffer));
-            } else {
-                return illegal_instruction(reinterpret_cast<riscv_isa::Instruction *>(&this->inst_buffer));
-            }
-        }
-
     public:
-        RetT illegal_instruction(neutron_unused riscv_isa::Instruction *inst) { return 0; }
+        RetT illegal_instruction(neutron_unused const riscv_isa::Instruction *inst) { return 0; }
 
         template<typename InstT>
         RetT log_branch(InstT *inst) {
@@ -97,49 +76,39 @@ namespace neutron {
 
         template<typename InstT>
         struct _return_inst_len {
-            static RetT inner(neutron_unused BlockVisitor *self, neutron_unused InstT *inst);
+            static RetT inner(BlockVisitor *self, const InstT *inst);
         };
 
         template<typename InstT>
-        RetT return_inst_len(neutron_unused InstT *inst) {
+        RetT return_inst_len(const InstT *inst) {
             return _return_inst_len<InstT>::inner(this, inst);
         }
 
 #define _neutron_return_inst_len(NAME, name) \
-        RetT visit_##name##_inst(riscv_isa::NAME##Inst *inst) { return return_inst_len(inst); }
+        RetT visit_##name##_inst(const riscv_isa::NAME##Inst *inst) { return return_inst_len(inst); }
 
         riscv_isa_instruction_map(_neutron_return_inst_len)
 
 #undef _neutron_return_inst_len
 
-        static Graph<UXLenT> build(UXLenT guest, void *host, usize size) {
-            return BlockVisitor{}.blocking(guest, host, size);
+        static Graph<UXLenT> build(UXLenT guest, void *host, usize size, BranchMapT &branch, BranchMapT &indirect) {
+            return BlockVisitor{branch, indirect}.blocking(guest, host, size);
         }
     };
 
     template<typename InstT>
     BlockVisitor::RetT BlockVisitor::_return_inst_len<InstT>::inner(
-            neutron_unused BlockVisitor *self, neutron_unused InstT *inst
+            neutron_unused BlockVisitor *self, neutron_unused const InstT *inst
     ) { return InstT::INST_WIDTH; }
-//
-//    template<>
-//    BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::AUIPCInst>::inner(
-//            BlockVisitor *self, riscv_isa::AUIPCInst *inst
-//    ) {
-//        // todo: instruction fuse
-//
-//        return riscv_isa::AUIPCInst::INST_WIDTH;
-//    }
 
     template<>
     BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::JALInst>::inner(
-            BlockVisitor *self, riscv_isa::JALInst *inst
+            BlockVisitor *self, const riscv_isa::JALInst *inst
     ) {
         if (is_link(inst->get_rd())) {
             // direct function call
             UXLenT next_inst = self->inst_offset + riscv_isa::JALInst::INST_WIDTH;
             self->block.emplace(self->inst_offset, std::make_pair(next_inst, next_inst));
-            self->function_call.emplace(self->inst_offset, self->inst_offset + inst->get_imm());
         } else {
             // direct jump
             usize target = self->inst_offset + inst->get_imm();
@@ -151,7 +120,7 @@ namespace neutron {
 
     template<>
     BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::JALRInst>::inner(
-            BlockVisitor *self, riscv_isa::JALRInst *inst
+            BlockVisitor *self, const riscv_isa::JALRInst *inst
     ) {
         self->indirect.emplace(self->inst_offset, self->indirect.size());
 
@@ -159,7 +128,6 @@ namespace neutron {
             // indirect function call
             UXLenT next_inst = self->inst_offset + riscv_isa::JALRInst::INST_WIDTH;
             self->block.emplace(self->inst_offset, std::make_pair(next_inst, next_inst));
-            self->function_call.emplace(self->inst_offset, 0);
         } else {
             // indirect jump
             self->block.emplace(self->inst_offset, std::make_pair(0, 0));
@@ -170,32 +138,32 @@ namespace neutron {
 
     template<>
     BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::BEQInst>::inner(
-            BlockVisitor *self, riscv_isa::BEQInst *inst
+            BlockVisitor *self, const riscv_isa::BEQInst *inst
     ) { return self->log_branch(inst); }
 
     template<>
     BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::BNEInst>::inner(
-            BlockVisitor *self, riscv_isa::BNEInst *inst
+            BlockVisitor *self, const riscv_isa::BNEInst *inst
     ) { return self->log_branch(inst); }
 
     template<>
     BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::BLTInst>::inner(
-            BlockVisitor *self, riscv_isa::BLTInst *inst
+            BlockVisitor *self, const riscv_isa::BLTInst *inst
     ) { return self->log_branch(inst); }
 
     template<>
     BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::BGEInst>::inner(
-            BlockVisitor *self, riscv_isa::BGEInst *inst
+            BlockVisitor *self, const riscv_isa::BGEInst *inst
     ) { return self->log_branch(inst); }
 
     template<>
     BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::BLTUInst>::inner(
-            BlockVisitor *self, riscv_isa::BLTUInst *inst
+            BlockVisitor *self, const riscv_isa::BLTUInst *inst
     ) { return self->log_branch(inst); }
 
     template<>
     BlockVisitor::RetT BlockVisitor::_return_inst_len<riscv_isa::BGEUInst>::inner(
-            BlockVisitor *self, riscv_isa::BGEUInst *inst
+            BlockVisitor *self, const riscv_isa::BGEUInst *inst
     ) { return self->log_branch(inst); }
 }
 

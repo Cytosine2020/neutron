@@ -538,9 +538,9 @@ namespace neutron {
             if (addr >= before->first + before->second.size) return MemoryArea{0, 0, nullptr};
             if ((before->second.protection & prot) != prot) return MemoryArea{0, 0, nullptr};
             return MemoryArea{
-                .start = before->first,
-                .end = before->first + before->second.size,
-                .shift = static_cast<u8 *>(before->second.physical) - before->first,
+                    .start = before->first,
+                    .end = before->first + before->second.size,
+                    .shift = static_cast<u8 *>(before->second.physical) - before->first,
             };
         }
 
@@ -681,10 +681,34 @@ namespace neutron {
                 auto before = mem_areas.upper_bound(addr_page);
                 if (before->first < addr_page) { return brk; }
 
-                void *area = mmap(nullptr, addr_page - brk_page, PROT_READ | PROT_WRITE,
-                                  MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-                if (area == MAP_FAILED) { return brk; }
-                add_map(brk_page, area, addr_page - brk_page, riscv_isa::READ_WRITE);
+                auto ptr = mem_areas.find(start_brk);
+
+                if (ptr == mem_areas.end()) {
+                    void *area = mmap(nullptr, addr_page - brk_page, PROT_READ | PROT_WRITE,
+                                      MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+                    if (area == MAP_FAILED) { return brk; }
+
+                    add_map(brk_page, area, addr_page - brk_page, riscv_isa::READ_WRITE);
+                } else {
+                    UXLenT heap_size = addr_page - start_brk;
+
+                    void *area = mremap(ptr->second.physical, ptr->second.size, heap_size, MREMAP_MAYMOVE);
+                    if (area == MAP_FAILED) { return brk; }
+
+                    // this is due to a linux kernel bug
+                    void *begin = reinterpret_cast<u8 *>(area) + brk_page - start_brk;
+                    usize size = addr_page - brk_page;
+
+                    if (munmap(begin, size) != 0) { return brk; }
+                    if (mmap(begin, size, PROT_READ | PROT_WRITE,
+                             MAP_SHARED | MAP_ANONYMOUS | MAP_FIXED, -1, 0) == MAP_FAILED) {
+                        return brk;
+                    }
+                    // ---------------------------------
+
+                    ptr->second.physical = area;
+                    ptr->second.size = heap_size;
+                }
             }
 
             brk = addr;
@@ -938,7 +962,7 @@ namespace neutron {
         }
 
         int get_host_fd(int fd) {
-            if (fd < 0) return fd;
+            if (fd < 0) { return fd; }
 
             auto ptr = fd_map.find(fd);
 

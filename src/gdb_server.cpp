@@ -126,7 +126,7 @@ namespace neutron {
         return true;
 
         error:
-        close(socket_fd);
+        if (socket_fd != -1) { close(socket_fd); }
         return false;
     }
 

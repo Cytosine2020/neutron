@@ -44,10 +44,10 @@ namespace neutron {
                         return true;
                     case 'g':
                         for (usize i = 0; i < IntRegT::INTEGER_REGISTER_NUM; ++i) {
-                            if (!gdb.push_memory(this->get_x(i))) return false;
+                            if (!gdb.push_memory(sub_type()->get_x(i))) return false;
                         }
 
-                        if (!gdb.push_memory(this->get_pc()) || !gdb.send()) return false;
+                        if (!gdb.push_memory(sub_type()->get_pc()) || !gdb.send()) return false;
                         break;
                     case 'M': {
                         auto addr = message.pop_hex<UXLenT>();
