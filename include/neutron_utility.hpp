@@ -5,6 +5,7 @@
 #include <iostream>
 #include <cstddef>
 #include <type_traits>
+#include <cstring>
 
 
 namespace neutron {
@@ -119,11 +120,9 @@ namespace neutron {
     public:
         Array() : inner{nullptr}, size_{0} {}
 
-        explicit Array(usize size) :
-                inner{new T[size]{}}, size_{size} {}
+        explicit Array(usize size) : inner{new T[size]{}}, size_{size} {}
 
-        Array(Array &&other) noexcept:
-                inner{other.inner}, size_{other.size_} {
+        Array(Array &&other) noexcept: inner{other.inner}, size_{other.size_} {
             other.inner = nullptr;
         }
 
@@ -136,6 +135,26 @@ namespace neutron {
             }
 
             return *this;
+        }
+
+        Array copy() {
+            Array other{this->size_};
+
+            for (usize i = 0; i < this->size_; ++i) {
+                other.begin()[i] = this->begin()[i];
+            }
+
+            return other;
+        }
+
+        Array shallow_copy() {
+            Array other{};
+            other.inner = new T[size_];
+            other.size_ = size_;
+
+            memcpy(other.inner, this->inner, size_ * sizeof(T));
+
+            return other;
         }
 
         T &operator[](usize index) {

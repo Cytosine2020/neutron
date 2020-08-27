@@ -19,6 +19,7 @@
 #include "linux_std.hpp"
 #include "riscv_blocking.hpp"
 #include "dominator_tree.hpp"
+#include "fuzzer/seed_pool.hpp"
 
 
 namespace neutron {
@@ -78,17 +79,17 @@ namespace neutron {
             return BranchRecord{JALR, address, {.jalr = {target, rd, rs1}}};
         }
 
-        UXLenT get_op1() { return inner.branch.op1; }
+        UXLenT get_op1() const { return inner.branch.op1; }
 
-        UXLenT get_op2() { return inner.branch.op2; }
+        UXLenT get_op2() const { return inner.branch.op2; }
 
-        UXLenT get_target() { return inner.jalr.target; }
+        UXLenT get_target() const { return inner.jalr.target; }
 
-        u8 get_jal_rd() { return inner.jal.rd; }
+        u8 get_jal_rd() const { return inner.jal.rd; }
 
-        u8 get_jalr_rd() { return inner.jalr.rd; }
+        u8 get_jalr_rd() const { return inner.jalr.rd; }
 
-        u8 get_jalr_rs1() { return inner.jalr.rs1; }
+        u8 get_jalr_rs1() const { return inner.jalr.rs1; }
     };
 
     template<typename xlen>
@@ -97,15 +98,15 @@ namespace neutron {
         using UXLenT = typename xlen::UXLenT;
         using XLenT = typename xlen::XLenT;
 
-        using BranchRecordT = BranchRecord<xlen>;
+        using BranchRecordT = std::vector<BranchRecord<xlen>>;
 
     private:
         class Status {
         public:
-            typename std::vector<BranchRecordT>::iterator ptr, end;
+            typename BranchRecordT::iterator ptr, end;
             std::vector<UXLenT> stack;
 
-            explicit Status(std::vector<BranchRecordT> &record) :
+            explicit Status(BranchRecordT &record) :
                     ptr{record.begin()}, end{record.end()}, stack{0} {}
 
             void stack_seek(UXLenT target) {
@@ -125,19 +126,19 @@ namespace neutron {
 
             void step() {
                 switch (ptr->type) {
-                    case BranchRecordT::BEQ:
-                    case BranchRecordT::BNE:
-                    case BranchRecordT::BLT:
-                    case BranchRecordT::BGE:
-                    case BranchRecordT::BLTU:
-                    case BranchRecordT::BGEU:
+                    case BranchRecord<xlen>::BEQ:
+                    case BranchRecord<xlen>::BNE:
+                    case BranchRecord<xlen>::BLT:
+                    case BranchRecord<xlen>::BGE:
+                    case BranchRecord<xlen>::BLTU:
+                    case BranchRecord<xlen>::BGEU:
                         break;
-                    case BranchRecordT::JAL:
+                    case BranchRecord<xlen>::JAL:
                         if (is_link(ptr->get_jal_rd()))
                             stack.emplace_back(ptr->address + riscv_isa::JALInst::INST_WIDTH);
 
                         break;
-                    case BranchRecordT::JALR:
+                    case BranchRecord<xlen>::JALR:
                         if (is_link(ptr->get_jalr_rd())) {
                             if (is_link(ptr->get_jalr_rs1()) && ptr->get_jalr_rd() != ptr->get_jalr_rs1()) {
                                 stack_seek(ptr->get_target());
@@ -177,8 +178,8 @@ namespace neutron {
         };
 
         Status origin, modified;
-        std::map<UXLenT, UXLenT> &sync_point;
-        std::vector<UXLenT> affected_address;
+        const std::map<UXLenT, UXLenT> &sync_point;
+        std::unordered_set<UXLenT> affected_address;
         UXLenT sync_address; // zero stands for return to caller
         bool sync;
 
@@ -187,7 +188,7 @@ namespace neutron {
         template<typename OP>
         void compare_record_branch() {
             if (origin.ptr->get_op1() != modified.ptr->get_op1() || origin.ptr->get_op2() != modified.ptr->get_op2())
-                affected_address.emplace_back(origin.ptr->address);
+                affected_address.emplace(origin.ptr->address);
 
             if (OP::op(origin.ptr->get_op1(), origin.ptr->get_op2()) !=
                 OP::op(modified.ptr->get_op1(), modified.ptr->get_op2())) {
@@ -196,12 +197,12 @@ namespace neutron {
             }
         }
 
-        RecordCompare(std::vector<BranchRecordT> &origin, std::vector<BranchRecordT> &modified,
-                      std::map<UXLenT, UXLenT> &sync_point) :
+        RecordCompare(BranchRecordT &origin, BranchRecordT &modified,
+                      const std::map<UXLenT, UXLenT> &sync_point) :
                 origin{origin}, modified{modified}, sync_point{sync_point}, affected_address{}, sync_address{0},
                 sync{true} {}
 
-        std::vector<UXLenT> compare() {
+        std::unordered_set<UXLenT> compare() {
             while (true) {
                 if (modified.terminate()) {
                     while (!origin.terminate()) {
@@ -216,29 +217,29 @@ namespace neutron {
                     if (origin.ptr->type != modified.ptr->type) neutron_abort("unexpected");
 
                     switch (origin.ptr->type) {
-                        case BranchRecordT::BEQ:
+                        case BranchRecord<xlen>::BEQ:
                             compare_record_branch<riscv_isa::operators::EQ<xlen>>();
                             break;
-                        case BranchRecordT::BNE:
+                        case BranchRecord<xlen>::BNE:
                             compare_record_branch<riscv_isa::operators::NE<xlen>>();
                             break;
-                        case BranchRecordT::BLT:
+                        case BranchRecord<xlen>::BLT:
                             compare_record_branch<riscv_isa::operators::LT<xlen>>();
                             break;
-                        case BranchRecordT::BGE:
+                        case BranchRecord<xlen>::BGE:
                             compare_record_branch<riscv_isa::operators::GE<xlen>>();
                             break;
-                        case BranchRecordT::BLTU:
+                        case BranchRecord<xlen>::BLTU:
                             compare_record_branch<riscv_isa::operators::LTU<xlen>>();
                             break;
-                        case BranchRecordT::BGEU:
+                        case BranchRecord<xlen>::BGEU:
                             compare_record_branch<riscv_isa::operators::GEU<xlen>>();
                             break;
-                        case BranchRecordT::JAL:
+                        case BranchRecord<xlen>::JAL:
                             break;
-                        case BranchRecordT::JALR:
+                        case BranchRecord<xlen>::JALR:
                             if (origin.ptr->get_target() != modified.ptr->get_target()) {
-                                affected_address.emplace_back(origin.ptr->address);
+                                affected_address.emplace(origin.ptr->address);
                                 sync_address = 0;
                                 sync = false;
                             }
@@ -261,8 +262,9 @@ namespace neutron {
 
     public:
 
-        static std::vector<UXLenT> build(std::vector<BranchRecordT> &origin, std::vector<BranchRecordT> &modified,
-                                         std::map<UXLenT, UXLenT> &sync_point) {
+        static std::unordered_set<UXLenT> build(BranchRecordT &origin,
+                                                BranchRecordT &modified,
+                                                std::map<UXLenT, UXLenT> &sync_point) {
             return RecordCompare{origin, modified, sync_point}.compare();
         }
     };
@@ -278,8 +280,8 @@ namespace neutron {
         using IntRegT = typename SuperT::IntRegT;
         using CSRRegT = typename SuperT::CSRRegT;
 
-        using BranchRecordT = BranchRecord<xlen>;
-        using InputT = std::unordered_map<std::string, std::vector<u8>>;
+        using BranchRecordT = std::vector<BranchRecord<xlen>>;
+        using InputT = SeedPool::SeedT;
 
     private:
         SuperT *super() { return this; }
@@ -316,7 +318,7 @@ namespace neutron {
         }
 
     protected:
-        std::vector<BranchRecordT> record;
+        BranchRecordT record;
         InputT &input;
         std::unordered_map<std::string, u64> file_map;
         std::unordered_map<int, int> shadow_fd_map;
@@ -327,8 +329,8 @@ namespace neutron {
 
     public:
         LinuxFuzzerCore(UXLenT hart_id, LinuxProgram<xlen> &mem, InputT &input) :
-                SuperT{hart_id, mem}, record{}, input{input}, file_map{}, shadow_fd_map{},
-                rand{}, tmp_fd{-1}, null_fd{-1}, main{false} {
+                SuperT{hart_id, mem}, record{}, input{input},
+                file_map{}, shadow_fd_map{}, rand{}, tmp_fd{-1}, null_fd{-1}, main{false} {
             tmp_fd = open("/tmp/neutron", O_DIRECTORY);
             if (tmp_fd == -1) {
                 neutron_abort("unexpected open failed!");
@@ -342,87 +344,87 @@ namespace neutron {
             file_open(0);
         }
 
-        RetT visit_jal_inst(riscv_isa::JALInst *inst) {
+        RetT visit_jal_inst(const riscv_isa::JALInst *inst) {
             if (main) {
-                record.emplace_back(BranchRecordT::jal(sub_type()->get_pc(), inst->get_rd()));
+                record.emplace_back(BranchRecord<xlen>::jal(sub_type()->get_pc(), inst->get_rd()));
             }
 
             return super()->visit_jal_inst(inst);
         }
 
-        RetT visit_jalr_inst(riscv_isa::JALRInst *inst) {
+        RetT visit_jalr_inst(const riscv_isa::JALRInst *inst) {
             if (main) {
                 usize rs1 = inst->get_rs1();
                 XLenT imm = inst->get_imm();
                 UXLenT target = get_bits<UXLenT, xlen::XLEN, 1, 1>(sub_type()->get_x(rs1) + imm);
 
-                record.emplace_back(BranchRecordT::jalr(sub_type()->get_pc(), target, inst->get_rd(), rs1));
+                record.emplace_back(BranchRecord<xlen>::jalr(sub_type()->get_pc(), target, inst->get_rd(), rs1));
             }
 
             return super()->visit_jalr_inst(inst);
         }
 
-        RetT visit_beq_inst(riscv_isa::BEQInst *inst) {
+        RetT visit_beq_inst(const riscv_isa::BEQInst *inst) {
             if (main) {
                 UXLenT op1 = sub_type()->get_x(inst->get_rs1());
                 UXLenT op2 = sub_type()->get_x(inst->get_rs2());
 
-                record.emplace_back(BranchRecordT::beq(sub_type()->get_pc(), op1, op2));
+                record.emplace_back(BranchRecord<xlen>::beq(sub_type()->get_pc(), op1, op2));
             }
 
             return super()->visit_beq_inst(inst);
         }
 
-        RetT visit_bne_inst(riscv_isa::BNEInst *inst) {
+        RetT visit_bne_inst(const riscv_isa::BNEInst *inst) {
             if (main) {
                 UXLenT op1 = sub_type()->get_x(inst->get_rs1());
                 UXLenT op2 = sub_type()->get_x(inst->get_rs2());
 
-                record.emplace_back(BranchRecordT::bne(sub_type()->get_pc(), op1, op2));
+                record.emplace_back(BranchRecord<xlen>::bne(sub_type()->get_pc(), op1, op2));
             }
 
             return super()->visit_bne_inst(inst);
         }
 
-        RetT visit_blt_inst(riscv_isa::BLTInst *inst) {
+        RetT visit_blt_inst(const riscv_isa::BLTInst *inst) {
             if (main) {
                 UXLenT op1 = sub_type()->get_x(inst->get_rs1());
                 UXLenT op2 = sub_type()->get_x(inst->get_rs2());
 
-                record.emplace_back(BranchRecordT::blt(sub_type()->get_pc(), op1, op2));
+                record.emplace_back(BranchRecord<xlen>::blt(sub_type()->get_pc(), op1, op2));
             }
 
             return super()->visit_blt_inst(inst);
         }
 
-        RetT visit_bge_inst(riscv_isa::BGEInst *inst) {
+        RetT visit_bge_inst(const riscv_isa::BGEInst *inst) {
             if (main) {
                 UXLenT op1 = sub_type()->get_x(inst->get_rs1());
                 UXLenT op2 = sub_type()->get_x(inst->get_rs2());
 
-                record.emplace_back(BranchRecordT::bge(sub_type()->get_pc(), op1, op2));
+                record.emplace_back(BranchRecord<xlen>::bge(sub_type()->get_pc(), op1, op2));
             }
 
             return super()->visit_bge_inst(inst);
         }
 
-        RetT visit_bltu_inst(riscv_isa::BLTUInst *inst) {
+        RetT visit_bltu_inst(const riscv_isa::BLTUInst *inst) {
             if (main) {
                 UXLenT op1 = sub_type()->get_x(inst->get_rs1());
                 UXLenT op2 = sub_type()->get_x(inst->get_rs2());
 
-                record.emplace_back(BranchRecordT::bltu(sub_type()->get_pc(), op1, op2));
+                record.emplace_back(BranchRecord<xlen>::bltu(sub_type()->get_pc(), op1, op2));
             }
 
             return super()->visit_bltu_inst(inst);
         }
 
-        RetT visit_bgeu_inst(riscv_isa::BGEUInst *inst) {
+        RetT visit_bgeu_inst(const riscv_isa::BGEUInst *inst) {
             if (main) {
                 UXLenT op1 = sub_type()->get_x(inst->get_rs1());
                 UXLenT op2 = sub_type()->get_x(inst->get_rs2());
 
-                record.emplace_back(BranchRecordT::bgeu(sub_type()->get_pc(), op1, op2));
+                record.emplace_back(BranchRecord<xlen>::bgeu(sub_type()->get_pc(), op1, op2));
             }
 
             return super()->visit_bgeu_inst(inst);
@@ -451,13 +453,13 @@ namespace neutron {
                 if (file_ptr == file_map.end()) {
                     auto ptr = input.find(name);
                     if (ptr == input.end()) {
-                        std::vector<u8> content(tmp.st_size);
+                        Array<u8> content(tmp.st_size);
 
-                        if (pread(host_fd, content.data(), tmp.st_size, 0) != tmp.st_size) {
+                        if (pread(host_fd, content.begin(), tmp.st_size, 0) != tmp.st_size) {
                             neutron_abort("unexpected read failed!");
                         }
 
-                        ptr = input.emplace(name, std::move(content)).first;
+                        ptr = input.emplace(name, std::make_shared<Array<u8>>(std::move(content))).first;
                     }
 
                     int fd = -1;
@@ -473,9 +475,9 @@ namespace neutron {
                         }
                     }
 
-                    auto &content = ptr->second;
+                    auto content = ptr->second;
 
-                    if (static_cast<u64>(pwrite(fd, content.data(), content.size(), 0)) != content.size()) {
+                    if (static_cast<u64>(pwrite(fd, content->begin(), content->size(), 0)) != content->size()) {
                         neutron_abort("unexpected write failed!");
                     }
 
@@ -498,9 +500,9 @@ namespace neutron {
         }
 
         int get_host_fd(int fd) {
-            if (fd == 1 || fd == 2) {
-                return null_fd;
-            }
+            if (fd < 0) { return fd; }
+
+            if (fd == 1 || fd == 2) { return null_fd; }
 
             auto ptr = shadow_fd_map.find(fd);
             if (ptr == shadow_fd_map.end()) {
@@ -532,7 +534,7 @@ namespace neutron {
             return super()->sys_close(fd);
         }
 
-        std::vector<BranchRecordT> start() {
+        BranchRecordT start() {
             if (sub_type()->goto_main()) {
                 main = true;
 
@@ -547,7 +549,9 @@ namespace neutron {
                 close(item.second);
             }
 
-            // todo: delete tmp file
+            for (auto &item: file_map) {
+                unlinkat(tmp_fd, u64_to_string(item.second).data(), 0);
+            }
 
             close(tmp_fd);
             close(null_fd);
@@ -558,12 +562,13 @@ namespace neutron {
     bool get_sync_point(
             elf::MappedFileVisitor &visitor,
             std::map<typename xlen::UXLenT, typename xlen::UXLenT> &sync_point,
-            typename xlen::UXLenT shift
+            typename xlen::UXLenT shift,
+            BlockVisitor::BranchMapT &block, BlockVisitor::BranchMapT &indirect
     ) {
         using UXLenT = typename xlen::UXLenT;
 
         auto *elf_header = elf::ELFHeader<UXLenT>::read(visitor);
-        if (elf_header == nullptr) return false;
+        if (elf_header == nullptr) { return false; }
 
         std::map<UXLenT, typename elf::SymbolTableHeader<UXLenT>::SymbolTableEntry &> functions;
 
@@ -588,10 +593,9 @@ namespace neutron {
             auto &section = elf_header->sections(visitor)[func.section_header_index];
 
             void *start = visitor.address((func.value - section.address) + section.offset, func.size);
-            if (start == nullptr) return false;
+            if (start == nullptr) { return false; }
 
-            auto blocks = BlockVisitor::build(func.value, start, func.size);
-
+            auto blocks = BlockVisitor::build(func.value, start, func.size, block, indirect);
 
             for (auto vertex = blocks.begin(); vertex != blocks.end(); ++vertex) {
                 UXLenT first = vertex.get_vertex();

@@ -204,7 +204,7 @@ namespace neutron {
         }
 
         void gdb_close() {
-            close(gdb);
+            if (gdb != -1) { close(gdb); }
             gdb = -1;
         }
 
@@ -224,7 +224,7 @@ namespace neutron {
 
         GDBServer &operator=(GDBServer &&other) noexcept {
             if (this != &other) {
-                close(this->gdb);
+                if (this->gdb != -1) { close(this->gdb); }
                 this->recv_buffer = std::move(other.recv_buffer);
                 this->gdb = other.gdb;
                 this->debug = other.debug;
@@ -296,7 +296,7 @@ namespace neutron {
         bool send_reply(const char *msg) { return push_reply(msg) && send(); }
 
         ~GDBServer() {
-            close(gdb);
+            if (gdb != -1) { close(gdb); }
         }
     };
 }

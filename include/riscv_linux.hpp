@@ -31,8 +31,19 @@
 namespace neutron {
     template<typename SubT, typename xlen>
     class LinuxHart : public riscv_isa::Hart<SubT, xlen> {
+    public:
+        using SuperT = riscv_isa::Hart<SubT, xlen>;
+
+        using RetT = typename SuperT::RetT;
+        using XLenT = typename SuperT::XLenT;
+        using UXLenT = typename SuperT::UXLenT;
+        using IntRegT = typename SuperT::IntRegT;
+        using CSRRegT = typename SuperT::CSRRegT;
+
     private:
         SubT *sub_type() { return static_cast<SubT *>(this); }
+
+        SuperT *super() { return this; }
 
     protected:
         LinuxProgram<xlen> &pcb;
@@ -43,14 +54,6 @@ namespace neutron {
         bool debug;
 
     public:
-        using SuperT = riscv_isa::Hart<SubT, xlen>;
-
-        using RetT = typename SuperT::RetT;
-        using XLenT = typename SuperT::XLenT;
-        using UXLenT = typename SuperT::UXLenT;
-        using IntRegT = typename SuperT::IntRegT;
-        using CSRRegT = typename SuperT::CSRRegT;
-
         LinuxHart(UXLenT hart_id, LinuxProgram<xlen> &mem,
                   bool debug = false, std::ostream &debug_stream = std::cerr) :
                 SuperT{hart_id, mem.pc, mem.int_reg}, pcb{mem}, execute_cache{0, 0, nullptr},
@@ -112,16 +115,16 @@ namespace neutron {
 
 #if defined(__RV_EXTENSION_ZICSR__)
 
-        RetT get_csr_reg(neutron_unused UXLenT index) { return this->csr_reg[index]; }
+        RetT get_csr_reg(UXLenT index) { return this->csr_reg[index]; }
 
         RetT set_csr_reg(neutron_unused UXLenT index, neutron_unused UXLenT val) { return true; }
 
 #endif // defined(__RV_EXTENSION_ZICSR__)
 
-        RetT visit_inst(riscv_isa::Instruction *inst) { return sub_type()->illegal_instruction(inst); }
+        RetT visit_inst(const riscv_isa::Instruction *inst) { return sub_type()->illegal_instruction(inst); }
 
-        RetT visit_fence_inst(neutron_unused riscv_isa::FENCEInst *inst) {
-            this->inc_pc(riscv_isa::FENCEInst::INST_WIDTH);
+        RetT visit_fence_inst(neutron_unused const riscv_isa::FENCEInst *inst) {
+            sub_type()->inc_pc(riscv_isa::FENCEInst::INST_WIDTH);
             return true; // todo
         }
 
@@ -387,7 +390,7 @@ namespace neutron {
             Array<u8> buf{size};
 
             if (pcb.memory_copy_from_guest(buf.begin(), argp, size)) {
-                ret = ioctl(sub_type()->get_host_fd(fd), request, argp);
+                ret = ioctl(sub_type()->get_host_fd(fd), request, buf.begin());
                 if (ret == -1) {
                     ret = -errno;
                 }
@@ -1192,13 +1195,14 @@ namespace neutron {
         }
 
         bool u_mode_environment_call_handler() {
-            this->inc_pc(riscv_isa::ECALLInst::INST_WIDTH);
+            bool ret = false;
 
-            switch (this->get_x(IntRegT::A7)) {
+            switch (sub_type()->get_x(IntRegT::A7)) {
 #define make_syscall(num, name) \
                 case syscall::name: \
                     neutron_syscall(num, sub_type()->sys_##name); \
-                    return true
+                    ret = true; \
+                    break
 
                 make_syscall(2, getcwd);
                 make_syscall(3, fcntl);
@@ -1215,9 +1219,11 @@ namespace neutron {
                 make_syscall(4, readlinkat);
                 make_syscall(2, fstat);
                 case syscall::exit:
-                    return sub_type()->sys_exit(this->get_x(IntRegT::A0));
+                    ret = sub_type()->sys_exit(sub_type()->get_x(IntRegT::A0));
+                    break;
                 case syscall::exit_group:
-                    return sub_type()->sys_exit_group(this->get_x(IntRegT::A0));
+                    ret = sub_type()->sys_exit_group(sub_type()->get_x(IntRegT::A0));
+                    break;
                 make_syscall(6, futex);
                 make_syscall(0, sched_yield);
                 make_syscall(1, times);
@@ -1237,20 +1243,24 @@ namespace neutron {
                 make_syscall(5, statx);
                 default:
                     this->set_x(IntRegT::A0, -EPERM);
-                    std::cerr << "Invalid environment call number at " << std::hex << this->get_pc()
-                              << ", call number " << std::dec << this->get_x(IntRegT::A7)
+                    std::cerr << "Invalid environment call number at " << std::hex << sub_type()->get_pc()
+                              << ", call number " << std::dec << sub_type()->get_x(IntRegT::A7)
                               << std::endl;
 
-                    return true;
+                    ret = true;
 #undef make_syscall
             }
+
+            sub_type()->inc_pc(riscv_isa::ECALLInst::INST_WIDTH);
+
+            return ret;
         }
 
         bool goto_main() {
             bool old_debug = debug;
             debug = false;
 
-            while (static_cast<UXLenT>(this->get_pc()) != this->pcb.elf_main) {
+            while (static_cast<UXLenT>(sub_type()->get_pc()) != this->pcb.elf_main) {
                 if (!sub_type()->visit() && !sub_type()->trap_handler()) return false;
             }
 
@@ -1258,8 +1268,6 @@ namespace neutron {
 
             return true;
         }
-
-        void start() { while (sub_type()->visit() || sub_type()->trap_handler()) {}}
     };
 }
 
