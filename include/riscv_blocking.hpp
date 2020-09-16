@@ -21,6 +21,7 @@ namespace neutron {
         std::map<UXLenT, std::pair<UXLenT, UXLenT>> block;
         BranchMapT &branch;
         BranchMapT &indirect;
+        std::vector<std::pair<UXLenT, UXLenT>> &function_call;
         UXLenT inst_offset;
 
         static bool is_link(usize reg) { return reg == 1 || reg == 5; }
@@ -34,8 +35,8 @@ namespace neutron {
             }
         }
 
-        BlockVisitor(BranchMapT &branch, BranchMapT &indirect)
-                : block{}, branch{branch}, indirect{indirect}, inst_offset{0} {}
+        BlockVisitor(BranchMapT &branch, BranchMapT &indirect, std::vector<std::pair<UXLenT, UXLenT>> &function_call)
+                : block{}, branch{branch}, indirect{indirect}, function_call{function_call}, inst_offset{0} {}
 
         Graph<UXLenT> blocking(UXLenT guest, void *host, usize size) {
             usize offset = 0;
@@ -91,8 +92,10 @@ namespace neutron {
 
 #undef _neutron_return_inst_len
 
-        static Graph<UXLenT> build(UXLenT guest, void *host, usize size, BranchMapT &branch, BranchMapT &indirect) {
-            return BlockVisitor{branch, indirect}.blocking(guest, host, size);
+        static Graph<UXLenT> build(UXLenT guest, void *host, usize size,
+                                   BranchMapT &branch, BranchMapT &indirect,
+                                   std::vector<std::pair<UXLenT, UXLenT>> &function_call) {
+            return BlockVisitor{branch, indirect, function_call}.blocking(guest, host, size);
         }
     };
 
@@ -109,6 +112,7 @@ namespace neutron {
             // direct function call
             UXLenT next_inst = self->inst_offset + riscv_isa::JALInst::INST_WIDTH;
             self->block.emplace(self->inst_offset, std::make_pair(next_inst, next_inst));
+            self->function_call.emplace_back(self->inst_offset, self->inst_offset + inst->get_imm());
         } else {
             // direct jump
             usize target = self->inst_offset + inst->get_imm();

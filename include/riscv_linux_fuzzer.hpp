@@ -206,7 +206,7 @@ namespace neutron {
             while (true) {
                 if (modified.terminate()) {
                     while (!origin.terminate()) {
-                        origin.step(); // todo: finish origin if modified finished
+                        origin.step();
                     }
                 }
 
@@ -270,9 +270,9 @@ namespace neutron {
     };
 
     template<typename xlen>
-    class LinuxFuzzerCore : public LinuxHart<LinuxFuzzerCore<xlen>, xlen> {
+    class LinuxFuzzerCore : public LinuxHart_<LinuxFuzzerCore<xlen>, xlen> {
     public:
-        using SuperT = LinuxHart<LinuxFuzzerCore, xlen>;
+        using SuperT = LinuxHart_<LinuxFuzzerCore, xlen>;
 
         using RetT = typename SuperT::RetT;
         using XLenT = typename SuperT::XLenT;
@@ -595,12 +595,18 @@ namespace neutron {
             void *start = visitor.address((func.value - section.address) + section.offset, func.size);
             if (start == nullptr) { return false; }
 
-            auto blocks = BlockVisitor::build(func.value, start, func.size, block, indirect);
+            std::vector<std::pair<UXLenT, UXLenT>> function_call{};
+
+            auto blocks = BlockVisitor::build(func.value, start, func.size, block, indirect, function_call);
 
             for (auto vertex = blocks.begin(); vertex != blocks.end(); ++vertex) {
                 UXLenT first = vertex.get_vertex();
                 if (first == 0) continue;
             }
+
+            std::map<UXLenT, std::set<UXLenT>> dependency;
+
+
 
             auto pos_dominator = PosDominatorTree<UXLenT>::build(blocks, 0);
 

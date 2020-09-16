@@ -9,27 +9,27 @@
 
 
 namespace neutron {
-    template<typename SubT, typename xlen = typename riscv_isa::xlen_trait>
-    class LinuxGDBHart : public LinuxHart<SubT, xlen> {
+    template<typename xlen>
+    class LinuxGDBCore : public LinuxHart_<LinuxGDBCore<xlen>, xlen> {
     private:
         GDBServer gdb;
 
-        using SuperT = LinuxHart<SubT, xlen>;
+        using SuperT = LinuxHart_<LinuxGDBCore<xlen>, xlen>;
 
         SuperT *super() { return this; }
 
-        SubT *sub_type() { return static_cast<SubT *>(this); }
+        LinuxGDBCore *sub_type() { return this; }
 
     public:
-        using RetT = typename LinuxHart<SubT, xlen>::RetT;
-        using XLenT = typename LinuxHart<SubT, xlen>::XLenT;
-        using UXLenT = typename LinuxHart<SubT, xlen>::UXLenT;
-        using IntRegT = typename LinuxHart<SubT, xlen>::IntRegT;
-        using CSRRegT = typename LinuxHart<SubT, xlen>::CSRRegT;
+        using RetT = typename SuperT::RetT;
+        using XLenT = typename SuperT::XLenT;
+        using UXLenT = typename SuperT::UXLenT;
+        using IntRegT = typename SuperT::IntRegT;
+        using CSRRegT = typename SuperT::CSRRegT;
 
-        LinuxGDBHart(UXLenT hart_id, LinuxProgram<xlen> &mem,
+        LinuxGDBCore(UXLenT hart_id, LinuxProgram<xlen> &mem,
                      bool debug = false, std::ostream &debug_stream = std::cout) :
-                LinuxHart<SubT, xlen>{hart_id, mem, debug, debug_stream}, gdb{false} {}
+                SuperT{hart_id, mem, debug, debug_stream}, gdb{false} {}
 
         bool gdb_handler() {
             while (true) {
@@ -145,7 +145,7 @@ namespace neutron {
         bool break_point_handler(neutron_unused UXLenT addr) { return gdb_break_point(); }
 
         void start(u32 port) {
-            if (!this->goto_main()) { return; }
+            if (!sub_type()->goto_main()) { return; }
 
             if (!gdb.gdb_connect(port) || !gdb_handler()) { return; }
 

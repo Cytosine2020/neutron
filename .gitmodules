@@ -4,3 +4,6 @@
 [submodule "elf"]
 	path = elf
 	url = https://github.com/Cytosine1999/elf
+[submodule "asmjit"]
+	path = asmjit
+	url = ./asmjit

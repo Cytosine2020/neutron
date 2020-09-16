@@ -28,26 +28,41 @@ void create_tmp_dir() {
 }
 
 
+SeedPool::SeedT random_mutate_byte(const SeedPool::SeedT &origin, const std::string &name, u64 position) {
+    static std::mt19937 rand{std::random_device{}()};
+    static std::uniform_int_distribution<u8> dist{};
+
+    auto modified = origin;
+    auto modified_content = modified[name]->shallow_copy();
+
+    u8 old_val = modified_content[position];
+    u8 new_val = dist(rand);
+    while (new_val == old_val) { new_val = dist(rand); }
+
+    modified_content[position] = new_val;
+    modified[name] = std::make_shared<Array<u8>>(std::move(modified_content));
+
+    return modified;
+}
+
+
 int main(int argc, char **argv) {
-    if (argc < 2) neutron_abort("receive one file name!");
+    if (argc < 2) { neutron_abort("receive one file name!"); }
+
+    auto pair = process_argument(argc, argv, environ);
 
     create_tmp_dir();
 
     elf::MappedFileVisitor visitor = elf::MappedFileVisitor::open_elf(argv[1]);
-    if (visitor.get_fd() == -1) neutron_abort("memory map file failed!");
-
-    auto *elf_header = elf::ELFHeader<xlen::UXLenT>::read(visitor);
-    if (elf_header == nullptr) neutron_abort("ELF header broken!");
+    if (visitor.get_fd() == -1) { neutron_abort("memory map file failed!"); }
 
     SeedPool::SeedT origin_seed{};
     LinuxProgram<xlen> mem1{};
-    if (!mem1.load_elf(argv[1], argc - 1, argv + 1, environ)) neutron_abort("ELF file broken!");
+    if (!mem1.load_elf(visitor, pair.first, pair.second)) { neutron_abort("ELF file broken!"); }
     auto origin_record = LinuxFuzzerCore<xlen>{0, mem1, origin_seed}.start();
 
     std::vector<std::pair<Array<char>, xlen::UXLenT>> result{};
-    if (!get_dynamic_library(visitor, mem1, result)) neutron_warn("Failed to get debug info!");
-
-    const char *system_root = getenv("RISCV_SYSROOT");
+    if (!get_dynamic_library(visitor, mem1, result)) { neutron_warn("Failed to get debug info!"); }
 
     BlockVisitor::BranchMapT block{}, indirect{};
 
@@ -55,6 +70,8 @@ int main(int argc, char **argv) {
     if (!get_sync_point<xlen>(visitor, sync_point, mem1.elf_shift, block, indirect)) {
         neutron_unreachable("The validation of elf file has been already checked!");
     }
+
+    const char *system_root = getenv("RISCV_SYSROOT");
 
     for (auto &item: result) {
         const char *name = item.first.begin();
@@ -75,31 +92,20 @@ int main(int argc, char **argv) {
 
     /// find out which file is interesting
 
-    std::random_device rand{};
     std::map<usize, std::set<std::string>> file_priority{};
 
     for (auto &item: origin_seed) {
         auto &name = item.first;
         auto origin_content = item.second;
+        auto origin_size = origin_content->size();
 
         std::unordered_set<xlen::UXLenT> affected_address{};
 
         for (usize i = 0; i < 10; ++i) {
-            auto modified_seed = origin_seed;
-            auto modified_content = origin_content->shallow_copy();
-
-            u64 pos = (1 << i) % modified_content.size();
-
-            u8 old_val = modified_content[pos];
-            u8 new_val = static_cast<u8>(rand());
-            while (new_val == old_val) { new_val = static_cast<u8>(rand()); }
-
-            modified_content[pos] = static_cast<u8>(rand());
-
-            modified_seed[name] = std::make_shared<Array<u8>>(std::move(modified_content));
+            auto modified_seed = random_mutate_byte(origin_seed, name, (1 << i) % origin_size);
 
             LinuxProgram<xlen> mem2{};
-            if (!mem2.load_elf(argv[1], argc - 1, argv + 1, environ)) {
+            if (!mem2.load_elf(visitor, pair.first, pair.second)) {
                 neutron_abort("ELF file broken!");
             }
 
@@ -123,19 +129,10 @@ int main(int argc, char **argv) {
             std::map<xlen::UXLenT, std::set<u64>> input_dependency;
 
             for (usize i = 0; i < size; ++i) {
-                auto modified_seed = origin_seed;
-                auto modified_content = origin_content->shallow_copy();
-
-                u8 old_val = modified_content[i];
-                u8 new_val = static_cast<u8>(rand());
-                while (new_val == old_val) { new_val = static_cast<u8>(rand()); }
-
-                modified_content[i] = static_cast<u8>(rand());
-
-                modified_seed[name] = std::make_shared<Array<u8>>(std::move(modified_content));
+                auto modified_seed = random_mutate_byte(origin_seed, name, i);
 
                 LinuxProgram<xlen> mem2{};
-                if (!mem2.load_elf(argv[1], argc - 1, argv + 1, environ)) {
+                if (!mem2.load_elf(visitor, pair.first, pair.second)) {
                     neutron_abort("ELF file broken!");
                 }
 

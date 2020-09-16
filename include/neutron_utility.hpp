@@ -137,7 +137,7 @@ namespace neutron {
             return *this;
         }
 
-        Array copy() {
+        Array copy() const {
             Array other{this->size_};
 
             for (usize i = 0; i < this->size_; ++i) {
@@ -147,7 +147,7 @@ namespace neutron {
             return other;
         }
 
-        Array shallow_copy() {
+        Array shallow_copy() const {
             Array other{};
             other.inner = new T[size_];
             other.size_ = size_;
