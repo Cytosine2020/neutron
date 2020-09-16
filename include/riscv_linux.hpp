@@ -22,15 +22,17 @@
 
 #include "target/hart.hpp"
 #include "target/dump.hpp"
+#include "translator.hpp"
 
 #include "neutron_utility.hpp"
 #include "riscv_linux_program.hpp"
 #include "linux_std.hpp"
 
+#include "dynamic_translation.h"
 
 namespace neutron {
     template<typename SubT, typename xlen>
-    class LinuxHart : public riscv_isa::Hart<SubT, xlen> {
+    class LinuxHart_ : public riscv_isa::Hart<SubT, xlen> {
     public:
         using SuperT = riscv_isa::Hart<SubT, xlen>;
 
@@ -39,6 +41,8 @@ namespace neutron {
         using UXLenT = typename SuperT::UXLenT;
         using IntRegT = typename SuperT::IntRegT;
         using CSRRegT = typename SuperT::CSRRegT;
+
+        using TranslateT = Translator<Emitter<xlen>, xlen>;
 
     private:
         SubT *sub_type() { return static_cast<SubT *>(this); }
@@ -50,12 +54,13 @@ namespace neutron {
         typename LinuxProgram<xlen>::MemoryArea execute_cache;
         typename LinuxProgram<xlen>::MemoryArea load_cache;
         typename LinuxProgram<xlen>::MemoryArea store_cache;
+        std::unordered_map<UXLenT, void *> code_cache;
         std::ostream &debug_stream;
         bool debug;
 
     public:
-        LinuxHart(UXLenT hart_id, LinuxProgram<xlen> &mem,
-                  bool debug = false, std::ostream &debug_stream = std::cerr) :
+        LinuxHart_(UXLenT hart_id, LinuxProgram<xlen> &mem,
+                   bool debug = false, std::ostream &debug_stream = std::cerr) :
                 SuperT{hart_id, mem.pc, mem.int_reg}, pcb{mem}, execute_cache{0, 0, nullptr},
                 load_cache{0, 0, nullptr}, store_cache{0, 0, nullptr},
                 debug_stream{debug_stream}, debug{debug} {
@@ -110,6 +115,51 @@ namespace neutron {
                     execute_cache = area;
                     return reinterpret_cast<ValT *>(area.shift + addr);
                 }
+            }
+        }
+
+        static bool neutron_mmu_execute_fast_call(struct dynamic_info *info, UXLenT addr) {
+            LinuxProgram<xlen> &pcb = reinterpret_cast<SubT *>(info->core)->pcb;
+
+            auto area = pcb.get_memory_area(addr, riscv_isa::EXECUTE);
+
+            if (area.start == 0) {
+                return false;
+            } else {
+                info->execute_cache.start = area.start;
+                info->execute_cache.end = area.end;
+                info->execute_cache.shift = reinterpret_cast<usize>(area.shift);
+                return true;
+            }
+        }
+
+        static bool neutron_mmu_load_fast_call(struct dynamic_info *info, UXLenT addr) {
+            LinuxProgram<xlen> &pcb = reinterpret_cast<SubT *>(info->core)->pcb;
+
+            auto area = pcb.get_memory_area(addr, riscv_isa::READ);
+
+            if (area.start == 0) {
+                return false;
+            } else {
+                info->load_cache.start = area.start;
+                info->load_cache.end = area.end;
+                info->load_cache.shift = reinterpret_cast<usize>(area.shift);
+                return true;
+            }
+        }
+
+        static bool neutron_mmu_store_fast_call(struct dynamic_info *info, UXLenT addr) {
+            LinuxProgram<xlen> &pcb = reinterpret_cast<SubT *>(info->core)->pcb;
+
+            auto area = pcb.get_memory_area(addr, riscv_isa::READ_WRITE);
+
+            if (area.start == 0) {
+                return false;
+            } else {
+                info->store_cache.start = area.start;
+                info->store_cache.end = area.end;
+                info->store_cache.shift = reinterpret_cast<usize>(area.shift);
+                return true;
             }
         }
 
@@ -744,15 +794,10 @@ namespace neutron {
             return ret;
         }
 
-        RetT sys_exit(XLenT status) {
-            pcb.exit_value = status;
-            return false;
-        }
+        void sys_exit(XLenT status) { pcb.exit_value = status; }
 
-        RetT sys_exit_group(XLenT status) {
-            pcb.exit_value = status; // todo: exit group
-            return false;
-        }
+        // todo: exit group
+        void sys_exit_group(XLenT status) { pcb.exit_value = status; }
 
         XLenT sys_futex(UXLenT uaddr, XLenT futex_op, XLenT val,
                         UXLenT val2, UXLenT uaddr2, XLenT val3) {
@@ -1219,10 +1264,12 @@ namespace neutron {
                 make_syscall(4, readlinkat);
                 make_syscall(2, fstat);
                 case syscall::exit:
-                    ret = sub_type()->sys_exit(sub_type()->get_x(IntRegT::A0));
+                    sub_type()->sys_exit(sub_type()->get_x(IntRegT::A0));
+                    ret = false;
                     break;
                 case syscall::exit_group:
-                    ret = sub_type()->sys_exit_group(sub_type()->get_x(IntRegT::A0));
+                    sub_type()->sys_exit_group(sub_type()->get_x(IntRegT::A0));
+                    ret = false;
                     break;
                 make_syscall(6, futex);
                 make_syscall(0, sched_yield);
@@ -1256,6 +1303,144 @@ namespace neutron {
             return ret;
         }
 
+        RetT visit_jal_inst(const riscv_isa::JALInst *inst) {
+            return super()->visit_jal_inst(inst);
+        }
+
+        RetT visit_jalr_inst(const riscv_isa::JALRInst *inst) {
+            return super()->visit_jalr_inst(inst);
+        }
+
+        RetT visit_beq_inst(const riscv_isa::BEQInst *inst) {
+            return super()->visit_beq_inst(inst);
+        }
+
+        RetT visit_bne_inst(const riscv_isa::BNEInst *inst) {
+            return super()->visit_bne_inst(inst);
+        }
+
+        RetT visit_blt_inst(const riscv_isa::BLTInst *inst) {
+            return super()->visit_blt_inst(inst);
+        }
+
+        RetT visit_bge_inst(const riscv_isa::BGEInst *inst) {
+            return super()->visit_bge_inst(inst);
+        }
+
+        RetT visit_bltu_inst(const riscv_isa::BLTUInst *inst) {
+            return super()->visit_bltu_inst(inst);
+        }
+
+        RetT visit_bgeu_inst(const riscv_isa::BGEUInst *inst) {
+            return super()->visit_bgeu_inst(inst);
+        }
+
+        void *get_host_pc(UXLenT guest_pc) {
+            auto ptr = code_cache.find(guest_pc);
+
+            if (ptr == code_cache.end()) {
+                return nullptr;
+            } else {
+                return ptr->second;
+            }
+        }
+
+        void dynamic_translate_execute() {
+            UXLenT pc = sub_type()->get_pc();
+            void *host_pc = get_host_pc(pc);
+
+            if (host_pc == nullptr) { return; }
+
+            struct dynamic_info info{
+                    .int_reg = {},
+                    .core = this,
+                    .execute_cache = {execute_cache.start,
+                                      execute_cache.end,
+                                      reinterpret_cast<usize>(execute_cache.shift)},
+                    .load_cache = {load_cache.start,
+                                   load_cache.end,
+                                   reinterpret_cast<usize>(load_cache.shift)},
+                    .store_cache = {store_cache.start,
+                                    store_cache.end,
+                                    reinterpret_cast<usize>(store_cache.shift)},
+
+#if defined(__RV_EXTENSION_A__)
+                    .reserve_address = this->reserve_address,
+                    .reserve_value = this->reserve_value,
+#endif
+
+                    .fast_call_return_addr = nullptr};
+
+            for (usize i = 0; i < IntRegT::INTEGER_REGISTER_NUM; ++i) {
+                info.int_reg[TranslateT::int_reg_guest_to_ir(i)] = sub_type()->get_x(i);
+            }
+
+            register usize rax asm ("rax") = reinterpret_cast<usize>(host_pc);
+            register usize rdx asm ("rdx") = info.int_reg[IntRegT::RA];
+            register usize rbx asm ("rbx") = info.int_reg[IntRegT::SP];
+            register usize rcx asm ("rcx") = reinterpret_cast<usize>(&info);
+            register usize rsi asm ("rsi") = info.int_reg[IntRegT::T0];
+            register usize rdi asm ("rdi") = info.int_reg[IntRegT::T1];
+            register usize r8 asm ("r8") = info.int_reg[IntRegT::A0];
+            register usize r9 asm ("r9") = info.int_reg[IntRegT::A1];
+            register usize r10 asm ("r10") = info.int_reg[IntRegT::A2];
+            register usize r11 asm ("r11") = info.int_reg[IntRegT::A3];
+            register usize r12 asm ("r12") = info.int_reg[IntRegT::A4];
+            register usize r13 asm ("r13") = info.int_reg[IntRegT::A5];
+            register usize r14 asm ("r14") = info.int_reg[IntRegT::A6];
+            register usize r15 asm ("r15") = info.int_reg[IntRegT::A7];
+
+            asm volatile (
+            "push %%rbp;"
+            "mov %%rcx, %%rbp;"
+            "call *%%rax;"
+            "pop %%rbp;"
+            : "+r" (rax), "+r" (rdx), "+r" (rbx), "+r" (rcx), "+r" (rsi), "+r" (rdi),
+            "+r" (r8), "+r" (r9), "+r" (r10), "+r" (r11),
+            "+r" (r12), "+r" (r13), "+r" (r14), "+r" (r15)
+            :
+            :"cc", "memory"
+            );
+
+            info.int_reg[IntRegT::RA] = rdx;
+            info.int_reg[IntRegT::SP] = rbx;
+            info.int_reg[IntRegT::T0] = rsi;
+            info.int_reg[IntRegT::T1] = rdi;
+            info.int_reg[IntRegT::A0] = r8;
+            info.int_reg[IntRegT::A1] = r9;
+            info.int_reg[IntRegT::A2] = r10;
+            info.int_reg[IntRegT::A3] = r11;
+            info.int_reg[IntRegT::A4] = r12;
+            info.int_reg[IntRegT::A5] = r13;
+            info.int_reg[IntRegT::A6] = r14;
+            info.int_reg[IntRegT::A7] = r15;
+
+            pc = rax;
+
+            for (usize i = 0; i < IntRegT::INTEGER_REGISTER_NUM; ++i) {
+                sub_type()->set_x(i, info.int_reg[TranslateT::int_reg_guest_to_ir(i)]);
+            }
+
+            execute_cache.start = info.execute_cache.start;
+            execute_cache.end = info.execute_cache.end;
+            execute_cache.shift = reinterpret_cast<u8 *>(info.execute_cache.shift);
+
+            load_cache.start = info.load_cache.start;
+            load_cache.end = info.load_cache.end;
+            load_cache.shift = reinterpret_cast<u8 *>(info.load_cache.shift);
+
+            store_cache.start = info.store_cache.start;
+            store_cache.end = info.store_cache.end;
+            store_cache.shift = reinterpret_cast<u8 *>(info.store_cache.shift);
+
+#if defined(__RV_EXTENSION_A__)
+            this->reserve_value = info.reserve_value;
+            this->reserve_address = info.reserve_address;
+#endif
+
+            sub_type()->jump_to_addr(pc);
+        }
+
         bool goto_main() {
             bool old_debug = debug;
             debug = false;
@@ -1268,6 +1453,24 @@ namespace neutron {
 
             return true;
         }
+
+//        void start() {
+//            TranslateT translator{pcb, static_cast<UXLenT>(sub_type()->get_pc())};
+//
+//            translator.visit();
+//
+//            do {
+//                sub_type()->dynamic_translate_execute();
+//            } while (sub_type()->visit() || sub_type()->trap_handler());
+//        }
+    };
+
+    template<typename xlen>
+    class LinuxHart : public LinuxHart_<LinuxHart<xlen>, xlen> {
+    public:
+        LinuxHart(typename xlen::UXLenT hart_id, LinuxProgram<xlen> &mem,
+                  bool debug = false, std::ostream &debug_stream = std::cerr) :
+                LinuxHart_<LinuxHart<xlen>, xlen>{hart_id, mem, debug, debug_stream} {}
     };
 }
 

@@ -14,8 +14,12 @@
 #include <random>
 #include <sstream>
 
+#include "riscv_isa_utility.hpp"
+#include "register/register.hpp"
+
 #include "elf_header.hpp"
 #include "linux_std.hpp"
+#include "neutron_argument.hpp"
 
 
 namespace neutron {
@@ -51,6 +55,26 @@ namespace neutron {
             UXLenT size;
             riscv_isa::MemoryProtection protection;
         };
+
+        void release() {
+            for (auto &area: mem_areas) {
+                if (area.second.physical != nullptr) {
+                    if (munmap(area.second.physical, area.second.size) != 0) {
+                        std::stringstream buf{};
+
+                        buf << std::hex << "Memory area 0x"
+                            << reinterpret_cast<usize>(area.second.physical) << " to 0x"
+                            << reinterpret_cast<usize>(area.second.physical) + area.second.size
+                            << " failed to release!"
+                            << std::dec << std::endl;
+
+                        neutron_warn(buf.str().c_str());
+                    }
+                }
+            }
+
+            for (auto &item: fd_map) { close(item.second); }
+        }
 
         riscv_isa::MemoryProtection prot_convert_to_guest(int prot) {
             if ((prot & NEUTRON_PROT_EXEC) > 0) {
@@ -218,54 +242,31 @@ namespace neutron {
             return true;
         }
 
-        bool load_aux_vec(int argc, char **argv, char **envp, std::vector<AuxiliaryEntry<UXLenT>> &auxv) {
+        bool load_aux_vec(const ArgumentT &argument, const EnviromentT &environment, AuxiliaryT<UXLenT> &auxv) {
             UXLenT stack_ptr = STACK_END - xlen::XLEN_BYTE;
 
             // arguments
-            std::vector<UXLenT> arg_vec{};
-            arg_vec.reserve(argc + 1);
-            usize arg_vec_size = sizeof(UXLenT) * (argc + 1);
+            std::vector<UXLenT> arg_vec(argument.size() + 1);
+            usize arg_vec_count = 0;
 
-            for (usize i = 0; i < static_cast<usize>(argc); ++i) {
-                usize len = strlen(argv[i]) + 1;
+            for (auto &item: argument) {
+                usize len = item.size() + 1;
                 stack_ptr -= len;
 
-                if (!memory_copy_to_guest(stack_ptr, argv[i], len)) { return false; }
+                if (!memory_copy_to_guest(stack_ptr, item.data(), len)) { return false; }
 
-                arg_vec[i] = stack_ptr;
-                if (i == 0) { auxv.emplace_back(NEUTRON_AT_EXECFN, stack_ptr); }
+                arg_vec[arg_vec_count++] = stack_ptr;
             }
 
-            arg_vec[argc] = 0;
+            arg_vec[arg_vec_count++] = 0;
+            usize arg_vec_size = sizeof(UXLenT) * arg_vec_count;
 
             // environment
 
-            std::map<std::string, std::string> environment{}, new_environment{};
-
-            for (usize envc = 0; envp[envc] != nullptr; ++envc) {
-                char *key = envp[envc];
-                char *value = strchr(envp[envc], '=');
-
-                environment.emplace(std::string{key, value}, std::string{value + 1});
-            }
-
-            environment.erase("LD_LIBRARY_PATH");
-            environment.erase("LD_PRELOAD");
-            environment.erase("RISCV_SYSROOT");
-
-            for (auto pair: environment) {
-                if (pair.first.rfind("NEUTRON_", 0) == 0) {
-                    new_environment[pair.first.substr(strlen("NEUTRON_"))] = pair.second;
-                } else {
-                    new_environment[pair.first] = pair.second;
-                }
-            }
-
-            std::vector<UXLenT> env_vec{};
-            env_vec.reserve(new_environment.size() + 1);
+            std::vector<UXLenT> env_vec(environment.size() + 1);
             usize env_vec_count = 0;
 
-            for (auto pair: new_environment) {
+            for (auto pair: environment) {
                 std::string env = pair.first + '=' + pair.second;
                 const char *real_env = env.c_str();
                 usize len = env.length() + 1;
@@ -280,6 +281,9 @@ namespace neutron {
             usize env_vec_size = sizeof(UXLenT) * env_vec_count;
 
             // auxiliary vector
+
+            // file name
+            auxv.emplace_back(NEUTRON_AT_EXECFN, arg_vec[0]);
 
             // platform
             usize len = strlen(platform_string) + 1;
@@ -307,27 +311,21 @@ namespace neutron {
             usize aux_vec_size = sizeof(AuxiliaryEntry<UXLenT>) * auxv.size();
 
             stack_ptr -= aux_vec_size;
-            if (!memory_copy_to_guest(stack_ptr, auxv.data(), aux_vec_size)) {
-                return false;
-            }
+            if (!memory_copy_to_guest(stack_ptr, auxv.data(), aux_vec_size)) { return false; }
 
             // envp
             stack_ptr -= env_vec_size;
-            if (!memory_copy_to_guest(stack_ptr, env_vec.data(), env_vec_size)) {
-                return false;
-            }
+            if (!memory_copy_to_guest(stack_ptr, env_vec.data(), env_vec_size)) { return false; }
 
             // argv
             stack_ptr -= arg_vec_size;
-            if (!memory_copy_to_guest(stack_ptr, arg_vec.data(), arg_vec_size)) {
-                return false;
-            }
+            if (!memory_copy_to_guest(stack_ptr, arg_vec.data(), arg_vec_size)) { return false; }
 
             // argc
             stack_ptr -= xlen::XLEN_BYTE;
             auto ptr = address<UXLenT>(stack_ptr, riscv_isa::READ_WRITE);
-            if (ptr == nullptr) return false;
-            *ptr = argc;
+            if (ptr == nullptr) { return false; }
+            *ptr = arg_vec_count - 1;
 
             int_reg.set_x(riscv_isa::IntegerRegister<xlen>::SP, stack_ptr);
 
@@ -391,9 +389,8 @@ namespace neutron {
         bool gdb;
 
         explicit LinuxProgram(bool gdb = false) :
-                sysroot{std::getenv("RISCV_SYSROOT") ?: ""},
-                mem_areas{}, fd_map{}, close_execute{}, fd_free_lower_bound{0},
-                brk{MEM_BEGIN}, start_brk{0},
+                sysroot{std::getenv("RISCV_SYSROOT") ?: ""}, mem_areas{},
+                fd_map{}, close_execute{}, fd_free_lower_bound{0}, brk{0}, start_brk{0},
                 elf_shift{0}, elf_entry{0}, elf_main{0}, exit_value{0},
                 int_reg{}, pc{0}, gdb{gdb} {
             add_map(0, nullptr, MEM_BEGIN, riscv_isa::NOT_PRESENT);
@@ -409,25 +406,26 @@ namespace neutron {
 
         LinuxProgram &operator=(const LinuxProgram &other) = delete;
 
-        bool load_elf(const char *elf_name, int argc, char **argv, char **envp) {
-            /// load stack
-
-            void *stack = mmap(nullptr, STACK_SIZE, PROT_WRITE | PROT_READ, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
-
-            if (stack == MAP_FAILED) { return false; }
-
-            add_map(STACK_END - STACK_SIZE, stack, STACK_SIZE, riscv_isa::READ_WRITE);
-
+        bool load_elf(elf::MappedFileVisitor &elf_visitor, const ArgumentT &arg, const EnviromentT &env) {
             /// get elf header
-
-            auto elf_visitor = elf::MappedFileVisitor::open_elf(elf_name);
-            if (elf_visitor.get_fd() == -1) neutron_abort("Failed to open ELF file!");
 
             auto *elf_header = elf::ELFHeader<UXLenT>::read(elf_visitor);
             if (elf_header == nullptr || (elf_header->file_type != elf::ELFHeader<UXLenT>::EXECUTABLE &&
                                           elf_header->file_type != elf::ELFHeader<UXLenT>::SHARED)) {
+                neutron_warn("file not elf or executable!");
                 return false;
             }
+
+            /// load stack
+
+            void *stack = mmap(nullptr, STACK_SIZE, PROT_WRITE | PROT_READ, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
+
+            if (stack == MAP_FAILED) {
+                neutron_warn("stack failed to load!");
+                return false;
+            }
+
+            add_map(STACK_END - STACK_SIZE, stack, STACK_SIZE, riscv_isa::READ_WRITE);
 
             /// get first interpreter files
 
@@ -441,11 +439,15 @@ namespace neutron {
 
                 auto lib_path = sysroot + inter_path_name->get_path_name(elf_visitor);
                 int_visitor = elf::MappedFileVisitor::open_elf(lib_path.c_str());
-                if (int_visitor.get_fd() == -1) { return false; }
+                if (int_visitor.get_fd() == -1) {
+                    neutron_warn("failed to ppen elf interpreter!");
+                    return false;
+                }
 
                 int_header = elf::ELFHeader<UXLenT>::read(int_visitor);
                 if (int_header == nullptr || (int_header->file_type != elf::ELFHeader<UXLenT>::EXECUTABLE &&
                                               int_header->file_type != elf::ELFHeader<UXLenT>::SHARED)) {
+                    neutron_warn("interpreter not elf or executable!");
                     return false;
                 }
 
@@ -457,26 +459,29 @@ namespace neutron {
             elf_shift = load_program(elf_visitor, elf_header, true);
             elf_entry = elf_header->entry_point + elf_shift;
             elf_main = elf_entry;
-            if (elf_entry == 0) { return false; }
+            if (elf_entry == 0) {
+                neutron_warn("failed to load elf file!");
+                return false;
+            }
 
             // get the main function
             auto *symtab_header = elf_header->template
                     get_section_header<elf::SymbolTableHeader<UXLenT>>(".symtab", elf_visitor);
             auto *strtab_header = elf_header->template
                     get_section_header<elf::StringTableHeader<UXLenT>>(".strtab", elf_visitor);
-            if (symtab_header == nullptr || strtab_header == nullptr) { return false; }
-            auto symbol_table = symtab_header->get_table(elf_visitor);
-            auto string_table = strtab_header->get_table(elf_visitor);
+            if (symtab_header != nullptr && strtab_header != nullptr) {
+                auto symbol_table = symtab_header->get_table(elf_visitor);
+                auto string_table = strtab_header->get_table(elf_visitor);
 
-            for (auto &symbol: symbol_table) {
-                if (strcmp(string_table.get_str(symbol.name), "main") == 0) {
-                    elf_main = symbol.value + elf_shift;
-                    break;
+                for (auto &symbol: symbol_table) {
+                    if (strcmp(string_table.get_str(symbol.name), "main") == 0) {
+                        elf_main = symbol.value + elf_shift;
+                        break;
+                    }
                 }
             }
 
-            UXLenT elf_header_addr;
-
+            UXLenT elf_header_addr = 0;
             for (auto &program: elf_header->programs(elf_visitor)) {
                 if (elf_header->program_header_offset > program.offset &&
                     elf_header->program_header_offset - program.offset < program.file_size) {
@@ -494,7 +499,10 @@ namespace neutron {
             if (int_header != nullptr) {
                 int_shift = load_program(int_visitor, int_header, false);
                 int_entry = int_header->entry_point + int_shift;
-                if (int_entry == 0) { return false; }
+                if (int_entry == 0) {
+                    neutron_warn("failed to load interpreter!");
+                    return false;
+                }
             }
 
             /// build auxiliary vectors
@@ -515,11 +523,24 @@ namespace neutron {
             auxv.emplace_back(NEUTRON_AT_EGID, getegid());
 //            auxv.emplace_back(NEUTRON_AT_SECURE, 0);
 
-            if (!load_aux_vec(argc, argv, envp, auxv)) { return false; }
+            if (!load_aux_vec(arg, env, auxv)) {
+                neutron_warn("failed to build argument, environment or auxiliary information!");
+                return false;
+            }
 
             /// initialize registers
             pc = static_cast<XLenT>(int_header == nullptr ? elf_entry : int_entry);
             return (pc & (RISCV_IALIGN / 8 - 1)) == 0; // check instruction align
+        }
+
+        bool load_elf(const char *elf_name, const ArgumentT &arg, const EnviromentT &env) {
+            auto elf_visitor = elf::MappedFileVisitor::open_elf(elf_name);
+            if (elf_visitor.get_fd() == -1) {
+                neutron_warn("Failed to open ELF file!");
+                return false;
+            }
+
+            return load_elf(elf_visitor, arg, env);
         }
 
         template<typename T>
@@ -1028,20 +1049,8 @@ namespace neutron {
             return ret;
         }
 
-        ~LinuxProgram() {
-            for (auto &area: mem_areas) {
-                if (area.second.physical != nullptr) {
-                    munmap(area.second.physical, area.second.size);
-                }
-            }
-
-            for (auto &item: fd_map) { close(item.second); }
-        }
+        ~LinuxProgram() { release(); }
     };
-
-    template<> const char *LinuxProgram<riscv_isa::xlen_32_trait>::platform_string = "riscv32";
-
-    template<> const char *LinuxProgram<riscv_isa::xlen_64_trait>::platform_string = "riscv64";
 }
 
 

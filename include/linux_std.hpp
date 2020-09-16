@@ -2,6 +2,9 @@
 #define NEUTRON_LINUX_STD_HPP
 
 
+#include "neutron_utility.hpp"
+
+
 #define neutron_syscall_0(func) \
     sub_type()->set_x(IntRegT::A0, func())
 
@@ -734,6 +737,9 @@ namespace neutron {
 
         AuxiliaryEntry(UXLenT type, UXLenT value) : type{type}, value{value} {}
     };
+
+    template<typename UXLenT>
+    using AuxiliaryT = std::vector<AuxiliaryEntry<UXLenT>>;
 
     /// debug struct from dynamic loader
 
