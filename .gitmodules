@@ -7,4 +7,4 @@
 
 [submodule "asmjit"]
 	path = asmjit
-	url = ./asmjit
+	url = https://github.com/asmjit/asmjit
