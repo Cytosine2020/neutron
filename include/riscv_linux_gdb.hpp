@@ -50,9 +50,9 @@ namespace neutron {
                         if (!gdb.push_memory(sub_type()->get_pc()) || !gdb.send()) return false;
                         break;
                     case 'M': {
-                        auto addr = message.pop_hex<UXLenT>();
+                        auto addr = message.template pop_hex<UXLenT>();
                         message.pop();
-                        auto size = message.pop_hex<UXLenT>();
+                        auto size = message.template pop_hex<UXLenT>();
                         message.pop();
 
                         if (!addr.first || !size.first) continue;
@@ -72,9 +72,9 @@ namespace neutron {
                     }
                         break;
                     case 'm': {
-                        auto addr = message.pop_hex<UXLenT>();
+                        auto addr = message.template pop_hex<UXLenT>();
                         message.pop();
-                        auto size = message.pop_hex<UXLenT>();
+                        auto size = message.template pop_hex<UXLenT>();
 
                         if (!addr.first || !size.first) continue;
 

@@ -21,10 +21,6 @@ int main(int argc, char **argv) {
 
     LinuxHart<xlen> core{0, mem};
 
-//    core.goto_main();
-//
-//    mem.dump_map(std::cout);
-
     core.start();
 
     exit(mem.exit_value);

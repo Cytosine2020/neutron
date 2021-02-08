@@ -10,25 +10,25 @@
 #include <sys/stat.h>
 #include <sys/uio.h>
 #include <sys/ioctl.h>
-#include <sys/sysinfo.h>
 #include <sys/utsname.h>
 #include <sys/syscall.h>
 #include <sys/times.h>
 #include <sys/resource.h>
+#if defined(__linux__)
+#include <sys/sysinfo.h>
 #include <linux/futex.h>
+#endif
 
 #include <iostream>
 #include <map>
 
 #include "target/hart.hpp"
 #include "target/dump.hpp"
-#include "translator.hpp"
 
 #include "neutron_utility.hpp"
 #include "riscv_linux_program.hpp"
 #include "linux_std.hpp"
 
-#include "dynamic_translation.h"
 
 namespace neutron {
     template<typename SubT, typename xlen>
@@ -42,8 +42,6 @@ namespace neutron {
         using IntRegT = typename SuperT::IntRegT;
         using CSRRegT = typename SuperT::CSRRegT;
 
-        using TranslateT = Translator<Emitter<xlen>, xlen>;
-
     private:
         SubT *sub_type() { return static_cast<SubT *>(this); }
 
@@ -54,7 +52,6 @@ namespace neutron {
         typename LinuxProgram<xlen>::MemoryArea execute_cache;
         typename LinuxProgram<xlen>::MemoryArea load_cache;
         typename LinuxProgram<xlen>::MemoryArea store_cache;
-        std::unordered_map<UXLenT, void *> code_cache;
         std::ostream &debug_stream;
         bool debug;
 
@@ -115,51 +112,6 @@ namespace neutron {
                     execute_cache = area;
                     return reinterpret_cast<ValT *>(area.shift + addr);
                 }
-            }
-        }
-
-        static bool neutron_mmu_execute_fast_call(struct dynamic_info *info, UXLenT addr) {
-            LinuxProgram<xlen> &pcb = reinterpret_cast<SubT *>(info->core)->pcb;
-
-            auto area = pcb.get_memory_area(addr, riscv_isa::EXECUTE);
-
-            if (area.start == 0) {
-                return false;
-            } else {
-                info->execute_cache.start = area.start;
-                info->execute_cache.end = area.end;
-                info->execute_cache.shift = reinterpret_cast<usize>(area.shift);
-                return true;
-            }
-        }
-
-        static bool neutron_mmu_load_fast_call(struct dynamic_info *info, UXLenT addr) {
-            LinuxProgram<xlen> &pcb = reinterpret_cast<SubT *>(info->core)->pcb;
-
-            auto area = pcb.get_memory_area(addr, riscv_isa::READ);
-
-            if (area.start == 0) {
-                return false;
-            } else {
-                info->load_cache.start = area.start;
-                info->load_cache.end = area.end;
-                info->load_cache.shift = reinterpret_cast<usize>(area.shift);
-                return true;
-            }
-        }
-
-        static bool neutron_mmu_store_fast_call(struct dynamic_info *info, UXLenT addr) {
-            LinuxProgram<xlen> &pcb = reinterpret_cast<SubT *>(info->core)->pcb;
-
-            auto area = pcb.get_memory_area(addr, riscv_isa::READ_WRITE);
-
-            if (area.start == 0) {
-                return false;
-            } else {
-                info->store_cache.start = area.start;
-                info->store_cache.end = area.end;
-                info->store_cache.shift = reinterpret_cast<usize>(area.shift);
-                return true;
             }
         }
 
@@ -279,95 +231,94 @@ namespace neutron {
                 }
                     break;
                 case NEUTRON_F_SETLK64:
-                case NEUTRON_F_SETLKW64: {
-                    struct ::flock64 host_buf{};
-                    flock64 guest_buf{};
-
-                    if (pcb.memory_copy_from_guest(&guest_buf, arg, sizeof(guest_buf))) {
-                        host_buf.l_type = guest_buf.l_type;
-                        host_buf.l_whence = guest_buf.l_whence;
-                        host_buf.l_start = guest_buf.l_start;
-                        host_buf.l_len = guest_buf.l_len;
-                        host_buf.l_pid = guest_buf.l_pid;
-
-                        ret = fcntl(sub_type()->get_host_fd(fd), cmd, &host_buf);
-
-                        if (ret == -1) {
-                            ret = -errno;
-                        }
-                    } else {
-                        ret = -EFAULT;
-                    }
-                }
-                    break;
-                case NEUTRON_F_GETLK64: {
-                    struct ::flock64 host_buf{};
-                    flock64 guest_buf{};
-
-                    if (pcb.memory_copy_from_guest(&guest_buf, arg, sizeof(guest_buf))) {
-                        host_buf.l_type = guest_buf.l_type;
-                        host_buf.l_whence = guest_buf.l_whence;
-                        host_buf.l_start = guest_buf.l_start;
-                        host_buf.l_len = guest_buf.l_len;
-                        host_buf.l_pid = guest_buf.l_pid;
-
-                        ret = fcntl(sub_type()->get_host_fd(fd), cmd, &host_buf);
-
-                        if (ret == -1) {
-                            ret = -errno;
-                        } else {
-                            guest_buf.l_type = host_buf.l_type;
-                            guest_buf.l_whence = host_buf.l_whence;
-                            guest_buf.l_start = host_buf.l_start;
-                            guest_buf.l_len = host_buf.l_len;
-                            guest_buf.l_pid = host_buf.l_pid;
-
-                            if (!pcb.memory_copy_to_guest(arg, &guest_buf, sizeof(guest_buf))) {
-                                ret = -EFAULT; // this should never happen.
-                            }
-                        }
-                    } else {
-                        ret = -EFAULT;
-                    }
-                }
-                    break;
-                case NEUTRON_F_GETOWN_EX: {
-                    struct ::f_owner_ex host_buf{};
-                    f_owner_ex guest_buf{};
-
-                    ret = fcntl(sub_type()->get_host_fd(fd), cmd, &host_buf);
-
-                    if (ret == -1) {
-                        ret = -errno;
-                    } else {
-                        guest_buf.type = static_cast<f_owner_ex::pid_type>(host_buf.type);
-                        guest_buf.pid = host_buf.pid;
-
-                        if (!pcb.memory_copy_to_guest(arg, &guest_buf, sizeof(guest_buf))) {
-                            ret = -EFAULT;
-                        }
-                    }
-                }
-                    break;
-                case NEUTRON_F_SETOWN_EX: {
-                    struct ::f_owner_ex host_buf{};
-                    f_owner_ex guest_buf{};
-
-                    if (pcb.memory_copy_from_guest(&guest_buf, arg, sizeof(guest_buf))) {
-                        host_buf.type = static_cast<__pid_type>(guest_buf.type);
-                        host_buf.pid = guest_buf.pid;
-
-                        ret = fcntl(sub_type()->get_host_fd(fd), cmd, &host_buf);
-
-                        if (ret == -1) {
-                            ret = -errno;
-                        }
-                    } else {
-                        ret = -EFAULT;
-                    }
-                }
-
-                    break;
+//                case NEUTRON_F_SETLKW64: {
+//                    struct ::flock64 host_buf{};
+//                    flock64 guest_buf{};
+//
+//                    if (pcb.memory_copy_from_guest(&guest_buf, arg, sizeof(guest_buf))) {
+//                        host_buf.l_type = guest_buf.l_type;
+//                        host_buf.l_whence = guest_buf.l_whence;
+//                        host_buf.l_start = guest_buf.l_start;
+//                        host_buf.l_len = guest_buf.l_len;
+//                        host_buf.l_pid = guest_buf.l_pid;
+//
+//                        ret = fcntl(sub_type()->get_host_fd(fd), cmd, &host_buf);
+//
+//                        if (ret == -1) {
+//                            ret = -errno;
+//                        }
+//                    } else {
+//                        ret = -EFAULT;
+//                    }
+//                }
+//                    break;
+//                case NEUTRON_F_GETLK64: {
+//                    struct ::flock64 host_buf{};
+//                    flock64 guest_buf{};
+//
+//                    if (pcb.memory_copy_from_guest(&guest_buf, arg, sizeof(guest_buf))) {
+//                        host_buf.l_type = guest_buf.l_type;
+//                        host_buf.l_whence = guest_buf.l_whence;
+//                        host_buf.l_start = guest_buf.l_start;
+//                        host_buf.l_len = guest_buf.l_len;
+//                        host_buf.l_pid = guest_buf.l_pid;
+//
+//                        ret = fcntl(sub_type()->get_host_fd(fd), cmd, &host_buf);
+//
+//                        if (ret == -1) {
+//                            ret = -errno;
+//                        } else {
+//                            guest_buf.l_type = host_buf.l_type;
+//                            guest_buf.l_whence = host_buf.l_whence;
+//                            guest_buf.l_start = host_buf.l_start;
+//                            guest_buf.l_len = host_buf.l_len;
+//                            guest_buf.l_pid = host_buf.l_pid;
+//
+//                            if (!pcb.memory_copy_to_guest(arg, &guest_buf, sizeof(guest_buf))) {
+//                                ret = -EFAULT; // this should never happen.
+//                            }
+//                        }
+//                    } else {
+//                        ret = -EFAULT;
+//                    }
+//                }
+//                    break;
+//                case NEUTRON_F_GETOWN_EX: {
+//                    struct ::f_owner_ex host_buf{};
+//                    f_owner_ex guest_buf{};
+//
+//                    ret = fcntl(sub_type()->get_host_fd(fd), cmd, &host_buf);
+//
+//                    if (ret == -1) {
+//                        ret = -errno;
+//                    } else {
+//                        guest_buf.type = static_cast<f_owner_ex::pid_type>(host_buf.type);
+//                        guest_buf.pid = host_buf.pid;
+//
+//                        if (!pcb.memory_copy_to_guest(arg, &guest_buf, sizeof(guest_buf))) {
+//                            ret = -EFAULT;
+//                        }
+//                    }
+//                }
+//                    break;
+//                case NEUTRON_F_SETOWN_EX: {
+//                    struct ::f_owner_ex host_buf{};
+//                    f_owner_ex guest_buf{};
+//
+//                    if (pcb.memory_copy_from_guest(&guest_buf, arg, sizeof(guest_buf))) {
+//                        host_buf.type = static_cast<__pid_type>(guest_buf.type);
+//                        host_buf.pid = guest_buf.pid;
+//
+//                        ret = fcntl(sub_type()->get_host_fd(fd), cmd, &host_buf);
+//
+//                        if (ret == -1) {
+//                            ret = -errno;
+//                        }
+//                    } else {
+//                        ret = -EFAULT;
+//                    }
+//                }
+//                    break;
                 case NEUTRON_F_GET_RW_HINT:
                 case NEUTRON_F_GET_FILE_RW_HINT: {
                     u64 host_buf, guest_buf;
@@ -434,7 +385,11 @@ namespace neutron {
         }
 
         XLenT sys_ioctl(int fd, UXLenT request, UXLenT argp) {
+#if defined(__linux__)
             UXLenT size = _IOC_SIZEMASK & (request >> _IOC_SIZESHIFT);
+#elif defined(__APPLE__)
+            UXLenT size = 0; // todo
+#endif
             XLenT ret;
 
             Array<u8> buf{size};
@@ -525,6 +480,7 @@ namespace neutron {
         }
 
         XLenT sys_pipe2(UXLenT pipefd, XLenT flags) {
+#if defined(__linux__)
             XLenT ret;
 
             int host_pipefd[2]{-1, -1};
@@ -556,6 +512,12 @@ namespace neutron {
             }
 
             return ret;
+#elif defined(__APPLE__)
+            (void) pipefd;
+            (void) flags;
+
+            return -EINVAL;
+#endif
         }
 
         // todo: this is different from 32 and 64
@@ -973,6 +935,7 @@ namespace neutron {
         }
 
         XLenT sys_sysinfo(UXLenT info) {
+#if defined(__linux__)
             XLenT ret;
 
             struct ::sysinfo host_info{};
@@ -1010,6 +973,10 @@ namespace neutron {
             }
 
             return ret;
+#else
+            (void) info;
+            return -EINVAL; // todo
+#endif
         }
 
         XLenT sys_brk(UXLenT addr) {
@@ -1054,7 +1021,7 @@ namespace neutron {
 
         /// the offset is counted in page, not byte!
         XLenT sys_mmap(UXLenT addr, UXLenT length, XLenT prot, XLenT flags, XLenT fd, UXLenT offset) {
-            XLenT ret = pcb.memory_map(addr, length, prot, flags, fd, offset);
+            XLenT ret = pcb.memory_map(addr, length, prot, flags, fd, offset << 12);
 
             if (static_cast<UXLenT>(ret) <= static_cast<UXLenT>(-RISCV_PAGE_SIZE)) {
                 invalid_cache();
@@ -1067,7 +1034,7 @@ namespace neutron {
                              << ", <prot> " << prot
                              << ", <flags> " << flags
                              << ", <fd> " << fd
-                             << ", <offset> " << offset
+                             << ", <offset> " << (offset << 12)
                              << ");" << std::endl;
             }
 
@@ -1093,7 +1060,8 @@ namespace neutron {
         }
 
         XLenT sys_prlimit64(XLenT pid, XLenT resource, UXLenT new_limit, UXLenT old_limit) {
-            XLenT ret; // todo:
+#if defined(__linux__)
+            XLenT ret; // todo
 
             struct rlimit host_old_limit{};
 
@@ -1130,6 +1098,14 @@ namespace neutron {
             }
 
             return ret;
+#elif defined(__APPLE__)
+            (void) pid;
+            (void) resource;
+            (void) new_limit;
+            (void) old_limit;
+
+            return -EINVAL;
+#endif
         }
 
         XLenT sys_statx(int dirfd, UXLenT pathname, XLenT flags, UXLenT mask, UXLenT statxbuf) {
@@ -1150,14 +1126,14 @@ namespace neutron {
 #if defined(__linux__)
                 ret = ::statx(sub_type()->get_host_fd(dirfd), real_name.c_str(), flags, mask, &host_buf);
 #elif defined(__APPLE__)
-                if (name.size() == 0) {
+                if (name.size() == 1) {
                     if ((flags & NEUTRON_AT_EMPTY_PATH) > 0) {
                         ret = fstat(dirfd, &host_buf);
                     } else {
                         ret = fstat(dirfd, &host_buf);
                     }
                 } else if (name[0] == '/') {
-                    ret = stat(real_name.c_str(), &host_buf);
+                    ret = ::stat(real_name.c_str(), &host_buf);
                 } else if (dirfd == AT_FDCWD) {
                     ret = fstatat(AT_FDCWD, real_name.c_str(), &host_buf, 0);
                 } else {
@@ -1303,144 +1279,6 @@ namespace neutron {
             return ret;
         }
 
-        RetT visit_jal_inst(const riscv_isa::JALInst *inst) {
-            return super()->visit_jal_inst(inst);
-        }
-
-        RetT visit_jalr_inst(const riscv_isa::JALRInst *inst) {
-            return super()->visit_jalr_inst(inst);
-        }
-
-        RetT visit_beq_inst(const riscv_isa::BEQInst *inst) {
-            return super()->visit_beq_inst(inst);
-        }
-
-        RetT visit_bne_inst(const riscv_isa::BNEInst *inst) {
-            return super()->visit_bne_inst(inst);
-        }
-
-        RetT visit_blt_inst(const riscv_isa::BLTInst *inst) {
-            return super()->visit_blt_inst(inst);
-        }
-
-        RetT visit_bge_inst(const riscv_isa::BGEInst *inst) {
-            return super()->visit_bge_inst(inst);
-        }
-
-        RetT visit_bltu_inst(const riscv_isa::BLTUInst *inst) {
-            return super()->visit_bltu_inst(inst);
-        }
-
-        RetT visit_bgeu_inst(const riscv_isa::BGEUInst *inst) {
-            return super()->visit_bgeu_inst(inst);
-        }
-
-        void *get_host_pc(UXLenT guest_pc) {
-            auto ptr = code_cache.find(guest_pc);
-
-            if (ptr == code_cache.end()) {
-                return nullptr;
-            } else {
-                return ptr->second;
-            }
-        }
-
-        void dynamic_translate_execute() {
-            UXLenT pc = sub_type()->get_pc();
-            void *host_pc = get_host_pc(pc);
-
-            if (host_pc == nullptr) { return; }
-
-            struct dynamic_info info{
-                    .int_reg = {},
-                    .core = this,
-                    .execute_cache = {execute_cache.start,
-                                      execute_cache.end,
-                                      reinterpret_cast<usize>(execute_cache.shift)},
-                    .load_cache = {load_cache.start,
-                                   load_cache.end,
-                                   reinterpret_cast<usize>(load_cache.shift)},
-                    .store_cache = {store_cache.start,
-                                    store_cache.end,
-                                    reinterpret_cast<usize>(store_cache.shift)},
-
-#if defined(__RV_EXTENSION_A__)
-                    .reserve_address = this->reserve_address,
-                    .reserve_value = this->reserve_value,
-#endif
-
-                    .fast_call_return_addr = nullptr};
-
-            for (usize i = 0; i < IntRegT::INTEGER_REGISTER_NUM; ++i) {
-                info.int_reg[TranslateT::int_reg_guest_to_ir(i)] = sub_type()->get_x(i);
-            }
-
-            register usize rax asm ("rax") = reinterpret_cast<usize>(host_pc);
-            register usize rdx asm ("rdx") = info.int_reg[IntRegT::RA];
-            register usize rbx asm ("rbx") = info.int_reg[IntRegT::SP];
-            register usize rcx asm ("rcx") = reinterpret_cast<usize>(&info);
-            register usize rsi asm ("rsi") = info.int_reg[IntRegT::T0];
-            register usize rdi asm ("rdi") = info.int_reg[IntRegT::T1];
-            register usize r8 asm ("r8") = info.int_reg[IntRegT::A0];
-            register usize r9 asm ("r9") = info.int_reg[IntRegT::A1];
-            register usize r10 asm ("r10") = info.int_reg[IntRegT::A2];
-            register usize r11 asm ("r11") = info.int_reg[IntRegT::A3];
-            register usize r12 asm ("r12") = info.int_reg[IntRegT::A4];
-            register usize r13 asm ("r13") = info.int_reg[IntRegT::A5];
-            register usize r14 asm ("r14") = info.int_reg[IntRegT::A6];
-            register usize r15 asm ("r15") = info.int_reg[IntRegT::A7];
-
-            asm volatile (
-            "push %%rbp;"
-            "mov %%rcx, %%rbp;"
-            "call *%%rax;"
-            "pop %%rbp;"
-            : "+r" (rax), "+r" (rdx), "+r" (rbx), "+r" (rcx), "+r" (rsi), "+r" (rdi),
-            "+r" (r8), "+r" (r9), "+r" (r10), "+r" (r11),
-            "+r" (r12), "+r" (r13), "+r" (r14), "+r" (r15)
-            :
-            :"cc", "memory"
-            );
-
-            info.int_reg[IntRegT::RA] = rdx;
-            info.int_reg[IntRegT::SP] = rbx;
-            info.int_reg[IntRegT::T0] = rsi;
-            info.int_reg[IntRegT::T1] = rdi;
-            info.int_reg[IntRegT::A0] = r8;
-            info.int_reg[IntRegT::A1] = r9;
-            info.int_reg[IntRegT::A2] = r10;
-            info.int_reg[IntRegT::A3] = r11;
-            info.int_reg[IntRegT::A4] = r12;
-            info.int_reg[IntRegT::A5] = r13;
-            info.int_reg[IntRegT::A6] = r14;
-            info.int_reg[IntRegT::A7] = r15;
-
-            pc = rax;
-
-            for (usize i = 0; i < IntRegT::INTEGER_REGISTER_NUM; ++i) {
-                sub_type()->set_x(i, info.int_reg[TranslateT::int_reg_guest_to_ir(i)]);
-            }
-
-            execute_cache.start = info.execute_cache.start;
-            execute_cache.end = info.execute_cache.end;
-            execute_cache.shift = reinterpret_cast<u8 *>(info.execute_cache.shift);
-
-            load_cache.start = info.load_cache.start;
-            load_cache.end = info.load_cache.end;
-            load_cache.shift = reinterpret_cast<u8 *>(info.load_cache.shift);
-
-            store_cache.start = info.store_cache.start;
-            store_cache.end = info.store_cache.end;
-            store_cache.shift = reinterpret_cast<u8 *>(info.store_cache.shift);
-
-#if defined(__RV_EXTENSION_A__)
-            this->reserve_value = info.reserve_value;
-            this->reserve_address = info.reserve_address;
-#endif
-
-            sub_type()->jump_to_addr(pc);
-        }
-
         bool goto_main() {
             bool old_debug = debug;
             debug = false;
@@ -1453,16 +1291,6 @@ namespace neutron {
 
             return true;
         }
-
-//        void start() {
-//            TranslateT translator{pcb, static_cast<UXLenT>(sub_type()->get_pc())};
-//
-//            translator.visit();
-//
-//            do {
-//                sub_type()->dynamic_translate_execute();
-//            } while (sub_type()->visit() || sub_type()->trap_handler());
-//        }
     };
 
     template<typename xlen>

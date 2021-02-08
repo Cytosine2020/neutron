@@ -6,6 +6,7 @@
 #include <zconf.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/uio.h>
 
 #include <map>
 #include <unordered_set>
@@ -440,7 +441,7 @@ namespace neutron {
                 auto lib_path = sysroot + inter_path_name->get_path_name(elf_visitor);
                 int_visitor = elf::MappedFileVisitor::open_elf(lib_path.c_str());
                 if (int_visitor.get_fd() == -1) {
-                    neutron_warn("failed to ppen elf interpreter!");
+                    neutron_warn("failed to open elf interpreter!");
                     return false;
                 }
 
@@ -702,34 +703,11 @@ namespace neutron {
                 auto before = mem_areas.upper_bound(addr_page);
                 if (before->first < addr_page) { return brk; }
 
-                auto ptr = mem_areas.find(start_brk);
+                void *area = mmap(nullptr, addr_page - brk_page, PROT_READ | PROT_WRITE,
+                                  MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+                if (area == MAP_FAILED) { return brk; }
 
-                if (ptr == mem_areas.end()) {
-                    void *area = mmap(nullptr, addr_page - brk_page, PROT_READ | PROT_WRITE,
-                                      MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-                    if (area == MAP_FAILED) { return brk; }
-
-                    add_map(brk_page, area, addr_page - brk_page, riscv_isa::READ_WRITE);
-                } else {
-                    UXLenT heap_size = addr_page - start_brk;
-
-                    void *area = mremap(ptr->second.physical, ptr->second.size, heap_size, MREMAP_MAYMOVE);
-                    if (area == MAP_FAILED) { return brk; }
-
-                    // this is due to a linux kernel bug
-                    void *begin = reinterpret_cast<u8 *>(area) + brk_page - start_brk;
-                    usize size = addr_page - brk_page;
-
-                    if (munmap(begin, size) != 0) { return brk; }
-                    if (mmap(begin, size, PROT_READ | PROT_WRITE,
-                             MAP_SHARED | MAP_ANONYMOUS | MAP_FIXED, -1, 0) == MAP_FAILED) {
-                        return brk;
-                    }
-                    // ---------------------------------
-
-                    ptr->second.physical = area;
-                    ptr->second.size = heap_size;
-                }
+                add_map(brk_page, area, addr_page - brk_page, riscv_isa::READ_WRITE);
             }
 
             brk = addr;
@@ -747,24 +725,27 @@ namespace neutron {
 
             UXLenT guest_addr = addr / RISCV_PAGE_SIZE * RISCV_PAGE_SIZE;
             UXLenT guest_length = divide_ceil(length, RISCV_PAGE_SIZE) * RISCV_PAGE_SIZE;
-            int host_flags = flags;
+            int host_flags = 0;
 
-            if ((flags & MAP_FIXED) > 0) {
+            if ((flags & NEUTRON_MAP_SHARED) > 0) { host_flags |= MAP_SHARED; }
+            if ((flags & NEUTRON_MAP_PRIVATE) > 0) { host_flags |= MAP_PRIVATE; }
+            if ((flags & NEUTRON_MAP_FIXED) > 0) {
                 if (addr != guest_addr) {
                     return -EINVAL;
                 }
 
                 fix = true;
-                host_flags &= (~MAP_FIXED);
             }
-
-            if ((flags & NEUTRON_MAP_FIXED_NOREPLACE) > 0) { neutron_abort("MAP_FIXED_NOREPLACE not support!"); }
-
+            if ((flags & NEUTRON_MAP_ANONYMOUS) > 0) { host_flags |= MAP_ANONYMOUS; }
             if ((flags & NEUTRON_MAP_GROWSDOWN) > 0) { neutron_abort("MAP_GROWSDOWN not support!"); }
-
-            if ((flags & NEUTRON_MAP_HUGETLB) > 0) { neutron_abort("MAP_HUGETLB not support!"); }
-
+            if ((flags & NEUTRON_MAP_LOCKED) > 0) { neutron_abort("MAP_LOCKED not support!"); }
+            if ((flags & NEUTRON_MAP_NORESERVE) > 0) { host_flags |= MAP_NORESERVE; }
+            if ((flags & NEUTRON_MAP_POPULATE) > 0) { neutron_abort("MAP_POPULATE not support!"); }
+            if ((flags & NEUTRON_MAP_NONBLOCK) > 0) { neutron_abort("MAP_NONBLOCK not support!"); }
             if ((flags & NEUTRON_MAP_STACK) > 0) { neutron_abort("MAP_STACK not support!"); }
+            if ((flags & NEUTRON_MAP_HUGETLB) > 0) { neutron_abort("MAP_HUGETLB not support!"); }
+            if ((flags & NEUTRON_MAP_SYNC) > 0) { neutron_abort("MAP_SYNC not support!"); }
+            if ((flags & NEUTRON_MAP_FIXED_NOREPLACE) > 0) { neutron_abort("MAP_FIXED_NOREPLACE not support!"); }
 
             if (fix) {
                 UXLenT ret = memory_unmap(guest_addr, guest_length);
@@ -774,7 +755,7 @@ namespace neutron {
                 if (guest_addr == 0) { return -ENOMEM; }
             }
 
-            map = mmap(nullptr, length, host_prot, host_flags, get_host_fd(fd), offset << 12);
+            map = mmap(nullptr, length, host_prot, host_flags, get_host_fd(fd), offset);
 
             if (map != MAP_FAILED) {
                 add_map(guest_addr, map, guest_length, guest_prot);
@@ -1051,6 +1032,8 @@ namespace neutron {
 
         ~LinuxProgram() { release(); }
     };
+
+    template<typename xlen> const char *LinuxProgram<xlen>::platform_string = nullptr;
 }
 
 

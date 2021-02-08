@@ -8,5 +8,3 @@ namespace neutron {
 
     template<> const char *LinuxProgram<riscv_isa::xlen_64_trait>::platform_string = "riscv64";
 }
-
-
