@@ -637,8 +637,8 @@ namespace neutron {
                 buf.reserve(iovcnt);
 
                 for (usize i = 0; i < iovcnt; ++i) {
-                    UXLenT base = vec[i].iov_base;
-                    UXLenT size = vec[i].iov_len;
+                    UXLenT base = vec[i].base;
+                    UXLenT size = vec[i].len;
 
                     auto before = --mem_areas.upper_bound(base);
 

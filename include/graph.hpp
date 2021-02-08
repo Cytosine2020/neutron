@@ -7,40 +7,42 @@
 
 
 namespace neutron {
-    template<typename T>
-    class Graph {
+template<typename T>
+class Graph {
+private:
+    std::map<T, std::pair<std::set<T>, std::set<T>>> inner;
+
+public:
+    using VertexSet = std::set<T> &;
+    using VertexIter = typename std::set<T>::iterator;
+
+    class VertexPtr : public std::map<T, std::pair<std::set<T>, std::set<T>>>::iterator {
     private:
-        std::map<T, std::pair<std::set<T>, std::set<T>>> inner;
+        using InnerT = typename std::map<T, std::pair<std::set<T>, std::set<T>>>::iterator;
 
     public:
-        using VertexSet = std::set<T> &;
-        using VertexIter = typename std::set<T>::iterator;
+        VertexPtr(InnerT iter) : InnerT{iter} {}
 
-        class VertexPtr : public std::map<T, std::pair<std::set<T>, std::set<T>>>::iterator {
-        private:
-            using InnerT = typename std::map<T, std::pair<std::set<T>, std::set<T>>>::iterator;
+        T get_vertex() { return this->operator->()->first; }
 
-        public:
-            VertexPtr(InnerT iter) : InnerT{iter} {}
+        VertexSet get_predecessor() { return this->operator->()->second.first; }
 
-            T get_vertex() { return this->operator->()->first; }
-            VertexSet get_predecessor() { return this->operator->()->second.first; }
-            VertexSet get_successor() { return this->operator->()->second.second; }
-        };
-
-        Graph() : inner{} {}
-
-        void add_vertex(T a, T b) {
-            inner[a].second.emplace(b);
-            inner[b].first.emplace(a);
-        }
-
-        VertexPtr find_vertex(T a) { return inner.find(a); }
-
-        VertexPtr begin() { return inner.begin(); }
-
-        VertexPtr end() { return inner.end(); }
+        VertexSet get_successor() { return this->operator->()->second.second; }
     };
+
+    Graph() : inner{} {}
+
+    void add_vertex(T a, T b) {
+        inner[a].second.emplace(b);
+        inner[b].first.emplace(a);
+    }
+
+    VertexPtr find_vertex(T a) { return inner.find(a); }
+
+    VertexPtr begin() { return inner.begin(); }
+
+    VertexPtr end() { return inner.end(); }
+};
 }
 
 
