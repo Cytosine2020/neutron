@@ -14,7 +14,7 @@ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -flto")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -ggdb -g3 -fno-omit-frame-pointer -D __DEBUG__")
 set(CMAKE_ASM_FLAGS "${CFLAGS} -x assembler-with-cpp")
 
-set(RISCV_LINUX_TARGET src/neutron_argument.cpp src/riscv_linux_program.cpp)
+set(RISCV_LINUX_TARGET src/neutron_argument.cpp)
 
 add_executable(neutron-riscv-linux src/riscv_linux_main.cpp ${RISCV_LINUX_TARGET})
 target_compile_definitions(neutron-riscv-linux PRIVATE

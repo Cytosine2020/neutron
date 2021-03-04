@@ -74,13 +74,13 @@ bool GDBServer::Buffer::receive_message(int socket, GDBServer::Buffer &buf) {
 
 bool GDBServer::gdb_connect(u32 port) {
     int socket_fd = socket(AF_INET, SOCK_STREAM, 0);
-    struct sockaddr_in local{
-            .sin_family = AF_INET,
-            .sin_port = htons(port),
-            .sin_addr = {.s_addr = INADDR_ANY},
-            .sin_zero = {},
-    };
+    struct sockaddr_in local{};
     struct sockaddr_in gdb_addr{};
+
+    local.sin_family = AF_INET;
+    local.sin_port = htons(port);
+    local.sin_addr = in_addr{.s_addr = INADDR_ANY};
+
     socklen_t len = sizeof(gdb_addr);
 
     if (socket_fd == -1) {

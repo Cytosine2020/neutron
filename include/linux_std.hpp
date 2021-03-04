@@ -426,72 +426,72 @@ enum class SyscallNum {
 
 /// auxiliary vector related macros and struct
 
-constexpr usize NEUTRON_AT_NULL = 0;       // end of vector
-constexpr usize NEUTRON_AT_IGNORE = 1;       // entry should be ignored
-constexpr usize NEUTRON_AT_EXECFD = 2;       // file descriptor of program
-constexpr usize NEUTRON_AT_PHDR = 3;       // program headers for program
-constexpr usize NEUTRON_AT_PHENT = 4;       // size of program header entry
-constexpr usize NEUTRON_AT_PHNUM = 5;       // number of program headers
-constexpr usize NEUTRON_AT_PAGESZ = 6;       // system page size
-constexpr usize NEUTRON_AT_BASE = 7;       // base address of interpreter
-constexpr usize NEUTRON_AT_FLAGS = 8;       // flags
-constexpr usize NEUTRON_AT_ENTRY = 9;       // entry point of program
-constexpr usize NEUTRON_AT_NOTELF = 10;      // program is not ELF
-constexpr usize NEUTRON_AT_UID = 11;      // real uid
-constexpr usize NEUTRON_AT_EUID = 12;      // effective uid
-constexpr usize NEUTRON_AT_GID = 13;      // real gid
-constexpr usize NEUTRON_AT_EGID = 14;      // effective gid
-constexpr usize NEUTRON_AT_PLATFORM = 15;      // string identifying CPU for optimizations
-constexpr usize NEUTRON_AT_HWCAP = 16;      // arch dependent hints at CPU capabilities
-constexpr usize NEUTRON_AT_CLKTCK = 17;      // frequency at which times() increments
+constexpr usize NEUTRON_AT_NULL = 0;            // end of vector
+constexpr usize NEUTRON_AT_IGNORE = 1;          // entry should be ignored
+constexpr usize NEUTRON_AT_EXECFD = 2;          // file descriptor of program
+constexpr usize NEUTRON_AT_PHDR = 3;            // program headers for program
+constexpr usize NEUTRON_AT_PHENT = 4;           // size of program header entry
+constexpr usize NEUTRON_AT_PHNUM = 5;           // number of program headers
+constexpr usize NEUTRON_AT_PAGESZ = 6;          // system page size
+constexpr usize NEUTRON_AT_BASE = 7;            // base address of interpreter
+constexpr usize NEUTRON_AT_FLAGS = 8;           // flags
+constexpr usize NEUTRON_AT_ENTRY = 9;           // entry point of program
+constexpr usize NEUTRON_AT_NOTELF = 10;         // program is not ELF
+constexpr usize NEUTRON_AT_UID = 11;            // real uid
+constexpr usize NEUTRON_AT_EUID = 12;           // effective uid
+constexpr usize NEUTRON_AT_GID = 13;            // real gid
+constexpr usize NEUTRON_AT_EGID = 14;           // effective gid
+constexpr usize NEUTRON_AT_PLATFORM = 15;       // string identifying CPU for optimizations
+constexpr usize NEUTRON_AT_HWCAP = 16;          // arch dependent hints at CPU capabilities
+constexpr usize NEUTRON_AT_CLKTCK = 17;         // frequency at which times() increments
 // AT_* values 18 through 22 are reserved
-constexpr usize NEUTRON_AT_SECURE = 23;      // secure mode boolean
-constexpr usize NEUTRON_AT_BASE_PLATFORM = 24;      // string identifying real platform, may differ from AT_PLATFORM.
-constexpr usize NEUTRON_AT_RANDOM = 25;      // address of 16 random bytes
-constexpr usize NEUTRON_AT_HWCAP2 = 26;      // extension of AT_HWCAP
+constexpr usize NEUTRON_AT_SECURE = 23;         // secure mode boolean
+constexpr usize NEUTRON_AT_BASE_PLATFORM = 24;  // string identifying real platform
+constexpr usize NEUTRON_AT_RANDOM = 25;         // address of 16 random bytes
+constexpr usize NEUTRON_AT_HWCAP2 = 26;         // extension of AT_HWCAP
 
-constexpr usize NEUTRON_AT_EXECFN = 31;      // filename of program
+constexpr usize NEUTRON_AT_EXECFN = 31;         // filename of program
 constexpr usize NEUTRON_AT_SYSINFO = 32;
 constexpr usize NEUTRON_AT_SYSINFO_EHDR = 33;
-constexpr usize NEUTRON_AT_EMPTY_PATH = 0x1000;      // Allow empty relative pathname.
+constexpr usize NEUTRON_AT_EMPTY_PATH = 0x1000; // Allow empty relative pathname.
 
 /// fstat related macro
 
-constexpr usize NEUTRON_F_DUPFD = 0;        // Duplicate file descriptor.
-constexpr usize NEUTRON_F_GETFD = 1;        // Get file descriptor flags.
-constexpr usize NEUTRON_F_SETFD = 2;        // Set file descriptor flags.
-constexpr usize NEUTRON_F_GETFL = 3;        // Get file status flags.
-constexpr usize NEUTRON_F_SETFL = 4;        // Set file status flags.
-constexpr usize NEUTRON_F_GETLK = 5;        // Get record locking info.
-constexpr usize NEUTRON_F_SETLK = 6;        // Set record locking info (non-blocking).
-constexpr usize NEUTRON_F_SETLKW = 7;        // Set record locking info (blocking).
+constexpr usize NEUTRON_F_DUPFD = 0;            // Duplicate file descriptor.
+constexpr usize NEUTRON_F_GETFD = 1;            // Get file descriptor flags.
+constexpr usize NEUTRON_F_SETFD = 2;            // Set file descriptor flags.
+constexpr usize NEUTRON_F_GETFL = 3;            // Get file status flags.
+constexpr usize NEUTRON_F_SETFL = 4;            // Set file status flags.
+constexpr usize NEUTRON_F_GETLK = 5;            // Get record locking info.
+constexpr usize NEUTRON_F_SETLK = 6;            // Set record locking info (non-blocking).
+constexpr usize NEUTRON_F_SETLKW = 7;           // Set record locking info (blocking).
 constexpr usize NEUTRON_F_SETOWN = 8;
 constexpr usize NEUTRON_F_GETOWN = 9;
-constexpr usize NEUTRON_F_SETSIG = 10;      // Set number of signal to be sent.
-constexpr usize NEUTRON_F_GETSIG = 11;      // Get number of signal to be sent.
-constexpr usize NEUTRON_F_GETLK64 = 12;        // Get record locking info.
-constexpr usize NEUTRON_F_SETLK64 = 13;        // Set record locking info (non-blocking).
+constexpr usize NEUTRON_F_SETSIG = 10;          // Set number of signal to be sent.
+constexpr usize NEUTRON_F_GETSIG = 11;          // Get number of signal to be sent.
+constexpr usize NEUTRON_F_GETLK64 = 12;         // Get record locking info.
+constexpr usize NEUTRON_F_SETLK64 = 13;         // Set record locking info (non-blocking).
 constexpr usize NEUTRON_F_SETLKW64 = 14;        // Set record locking info (blocking).
-constexpr usize NEUTRON_F_SETOWN_EX = 15;      // Get owner (thread receiving SIGIO).
-constexpr usize NEUTRON_F_GETOWN_EX = 16;      // Set owner (thread receiving SIGIO).
+constexpr usize NEUTRON_F_SETOWN_EX = 15;       // Get owner (thread receiving SIGIO).
+constexpr usize NEUTRON_F_GETOWN_EX = 16;       // Set owner (thread receiving SIGIO).
 constexpr usize NEUTRON_F_OFD_GETLK = 36;
 constexpr usize NEUTRON_F_OFD_SETLK = 37;
 constexpr usize NEUTRON_F_OFD_SETLKW = 38;
-constexpr usize NEUTRON_F_SETLEASE = 1024;    // Set a lease.
-constexpr usize NEUTRON_F_GETLEASE = 1025;    // Enquire what lease is active.
-constexpr usize NEUTRON_F_NOTIFY = 1026;    // Request notifications on a directory.
-constexpr usize NEUTRON_F_DUPFD_CLOEXEC = 1030;    // Duplicate file descriptor with close-on-exit set.
+constexpr usize NEUTRON_F_SETLEASE = 1024;      // Set a lease.
+constexpr usize NEUTRON_F_GETLEASE = 1025;      // Enquire what lease is active.
+constexpr usize NEUTRON_F_NOTIFY = 1026;        // Request notifications on a directory.
+constexpr usize NEUTRON_F_DUPFD_CLOEXEC = 1030; // Duplicate file descriptor with close-on-exit set.
 constexpr usize NEUTRON_F_SETPIPE_SZ = 1031;    // Set pipe page size array.
 constexpr usize NEUTRON_F_GETPIPE_SZ = 1032;    // Set pipe page size array.
-constexpr usize NEUTRON_F_ADD_SEALS = 1033;    // Add seals to file.
-constexpr usize NEUTRON_F_GET_SEALS = 1034;    // Get seals for file.
+constexpr usize NEUTRON_F_ADD_SEALS = 1033;     // Add seals to file.
+constexpr usize NEUTRON_F_GET_SEALS = 1034;     // Get seals for file.
 // Set / get write life time hints.  
 constexpr usize NEUTRON_F_GET_RW_HINT = 1035;
 constexpr usize NEUTRON_F_SET_RW_HINT = 1036;
 constexpr usize NEUTRON_F_GET_FILE_RW_HINT = 1037;
 constexpr usize NEUTRON_F_SET_FILE_RW_HINT = 1038;
 // For F_[GET|SET]FD.
-constexpr usize NEUTRON_FD_CLOEXEC = 1;       // Actually anything with low bit set goes
+constexpr usize NEUTRON_FD_CLOEXEC = 1;         // Actually anything with low bit set goes
 
 struct flock {
     i16 type;     // Type of lock: F_RDLCK, F_WRLCK, or F_UNLCK.
@@ -526,31 +526,33 @@ struct f_owner_ex {
 
 constexpr usize NEUTRON_O_WRONLY = 01;
 constexpr usize NEUTRON_O_RDWR = 02;
-constexpr usize NEUTRON_O_CREAT = 0100;                                // Not fcntl.
-constexpr usize NEUTRON_O_EXCL = 0200;                                // Not fcntl.
+constexpr usize NEUTRON_O_CREAT = 0100;                                 // Not fcntl.
+constexpr usize NEUTRON_O_EXCL = 0200;                                  // Not fcntl.
 constexpr usize NEUTRON_O_NOCTTY = 0400;                                // Not fcntl.
-constexpr usize NEUTRON_O_TRUNC = 01000;                               // Not fcntl.
+constexpr usize NEUTRON_O_TRUNC = 01000;                                // Not fcntl.
 constexpr usize NEUTRON_O_APPEND = 02000;
 constexpr usize NEUTRON_O_NONBLOCK = 04000;
-constexpr usize NEUTRON_O_DSYNC = 010000;                              // Synchronize data.
+constexpr usize NEUTRON_O_DSYNC = 010000;                               // Synchronize data.
 constexpr usize NEUTRON_O_ASYNC = 020000;
 constexpr usize NEUTRON_O_DIRECT = 040000;                              // Direct disk access.
 constexpr usize NEUTRON_O_LARGEFILE = 0100000;
-constexpr usize NEUTRON_O_DIRECTORY = 0200000;                             // Must be a directory.
-constexpr usize NEUTRON_O_NOFOLLOW = 0400000;                             // Do not follow links.
-constexpr usize NEUTRON_O_NOATIME = 01000000;                            // Do not set atime.
-constexpr usize NEUTRON_O_CLOEXEC = 02000000;                            // Set close_on_exec.
+constexpr usize NEUTRON_O_DIRECTORY = 0200000;                          // Must be a directory.
+constexpr usize NEUTRON_O_NOFOLLOW = 0400000;                           // Do not follow links.
+constexpr usize NEUTRON_O_NOATIME = 01000000;                           // Do not set atime.
+constexpr usize NEUTRON_O_CLOEXEC = 02000000;                           // Set close_on_exec.
 constexpr usize NEUTRON_O_SYNC = 04010000;
-constexpr usize NEUTRON_O_PATH = 010000000;                           // Resolve pathname but do not open file.
-constexpr usize NEUTRON_O_TMPFILE = 020000000 | NEUTRON_O_DIRECTORY;   // Atomically create nameless file.
+// Resolve pathname but do not open file.
+constexpr usize NEUTRON_O_PATH = 010000000;
+// Atomically create nameless file.
+constexpr usize NEUTRON_O_TMPFILE = 020000000 | NEUTRON_O_DIRECTORY;
 
 /// lseek related macro
 
-constexpr usize NEUTRON_SEEK_SET = 0;       // Seek from beginning of file.
-constexpr usize NEUTRON_SEEK_CUR = 1;       // Seek from current position.
-constexpr usize NEUTRON_SEEK_END = 2;       // Seek from end of file.
-constexpr usize NEUTRON_SEEK_DATA = 3;       // Seek to next data.  
-constexpr usize NEUTRON_SEEK_HOLE = 4;       // Seek to next hole.  
+constexpr usize NEUTRON_SEEK_SET = 0;   // Seek from beginning of file.
+constexpr usize NEUTRON_SEEK_CUR = 1;   // Seek from current position.
+constexpr usize NEUTRON_SEEK_END = 2;   // Seek from end of file.
+constexpr usize NEUTRON_SEEK_DATA = 3;  // Seek to next data.
+constexpr usize NEUTRON_SEEK_HOLE = 4;  // Seek to next hole.
 
 /// iovec
 
@@ -568,20 +570,20 @@ struct stat {
         u32 nsec;
     };
 
-    u64 dev;                 // Device.
-    u32 ino;                 // File serial number.
+    u64 dev;                    // Device.
+    u32 ino;                    // File serial number.
     u32 __pad1;
-    u32 mode;                // File mode.
-    u32 nlink;               // Link count.
-    u32 uid;                 // User ID of the file's owner.
-    u32 gid;                 // Group ID of the file's group.
-    u64 rdev;                // Device number, if device.
+    u32 mode;                   // File mode.
+    u32 nlink;                  // Link count.
+    u32 uid;                    // User ID of the file's owner.
+    u32 gid;                    // Group ID of the file's group.
+    u64 rdev;                   // Device number, if device.
     u64 __pad2;
-    u32 size;                // Size of file, in bytes.
+    u32 size;                   // Size of file, in bytes.
     u32 __pad3;
-    u32 blksize;             // Optimal block size for I/O.
+    u32 blksize;                // Optimal block size for I/O.
     u32 __pad4;
-    u32 blocks;              // 512-byte blocks
+    u32 blocks;                 // 512-byte blocks
     u32 __pad5;
     timespec atime;
     timespec mtime;             // Time of last modification.
@@ -696,19 +698,19 @@ inline std::ostream &operator<<(std::ostream &stream, const utsname &object) {
 /// sysinfo related macros and struct
 
 struct sysinfo {
-    i32 uptime;     // Seconds since boot
-    u32 loads[3];   // 1, 5, and 15 minute load averages
-    u32 totalram;   // Total usable main memory size
-    u32 freeram;    // Available memory size
-    u32 sharedram;  // Amount of shared memory
-    u32 bufferram;  // Memory used by buffers
-    u32 totalswap;  // Total swap space size
-    u32 freeswap;   // Swap space still available
-    u16 procs;      // Number of current processes
+    i32 uptime;         // Seconds since boot
+    u32 loads[3];       // 1, 5, and 15 minute load averages
+    u32 totalram;       // Total usable main memory size
+    u32 freeram;        // Available memory size
+    u32 sharedram;      // Amount of shared memory
+    u32 bufferram;      // Memory used by buffers
+    u32 totalswap;      // Total swap space size
+    u32 freeswap;       // Swap space still available
+    u16 procs;          // Number of current processes
     u16 __pad1;
-    u32 totalhigh;  // Total high memory size
-    u32 freehigh;   // Available high memory size
-    u32 mem_unit;   // Memory unit size in bytes
+    u32 totalhigh;      // Total high memory size
+    u32 freehigh;       // Available high memory size
+    u32 mem_unit;       // Memory unit size in bytes
     char __pad2[20 - 4 * sizeof(u32)];
 };
 
@@ -732,31 +734,33 @@ inline std::ostream &operator<<(std::ostream &stream, const sysinfo &object) {
 
 /// mmap related macros and struct
 
-constexpr usize NEUTRON_PROT_READ = 0x1;         // Page can be read.
-constexpr usize NEUTRON_PROT_WRITE = 0x2;         // Page can be written.
-constexpr usize NEUTRON_PROT_EXEC = 0x4;         // Page can be executed.
-constexpr usize NEUTRON_PROT_NONE = 0x0;         // Page can not be accessed.
-constexpr usize NEUTRON_PROT_GROWSDOWN = 0x01000000;  // Extend change to start of growsdown vma (mprotect only).
-constexpr usize NEUTRON_PROT_GROWSUP = 0x02000000;  // Extend change to start of growsup vma (mprotect only).
+constexpr usize NEUTRON_PROT_READ = 0x1;            // Page can be read.
+constexpr usize NEUTRON_PROT_WRITE = 0x2;           // Page can be written.
+constexpr usize NEUTRON_PROT_EXEC = 0x4;            // Page can be executed.
+constexpr usize NEUTRON_PROT_NONE = 0x0;            // Page can not be accessed.
+// Extend change to start of growsdown vma (mprotect only).
+constexpr usize NEUTRON_PROT_GROWSDOWN = 0x01000000;
+// Extend change to start of growsup vma (mprotect only).
+constexpr usize NEUTRON_PROT_GROWSUP = 0x02000000;
 
 constexpr usize NEUTRON_MAP_FILE = 0;
-constexpr usize NEUTRON_MAP_SHARED = 0x01;        // Share changes.
-constexpr usize NEUTRON_MAP_PRIVATE = 0x02;        // Changes are private.
-constexpr usize NEUTRON_MAP_SHARED_VALIDATE = 0x03;        // Share changes and validate extension flags.
-constexpr usize NEUTRON_MAP_TYPE = 0x0f;        // Mask for type of mapping.
-constexpr usize NEUTRON_MAP_FIXED = 0x10;        // Interpret addr exactly.
-constexpr usize NEUTRON_MAP_ANONYMOUS = 0x20;        // Don't use a file.
-constexpr usize NEUTRON_MAP_GROWSDOWN = 0x00100;     // Stack-like segment.
-constexpr usize NEUTRON_MAP_DENYWRITE = 0x00800;     // ETXTBSY.
-constexpr usize NEUTRON_MAP_EXECUTABLE = 0x01000;     // Mark it as an executable.
-constexpr usize NEUTRON_MAP_LOCKED = 0x02000;     // Lock the mapping.
-constexpr usize NEUTRON_MAP_NORESERVE = 0x04000;     // Don't check for reservations.
+constexpr usize NEUTRON_MAP_SHARED = 0x01;          // Share changes.
+constexpr usize NEUTRON_MAP_PRIVATE = 0x02;         // Changes are private.
+constexpr usize NEUTRON_MAP_SHARED_VALIDATE = 0x03; // Share changes and validate extension flags.
+constexpr usize NEUTRON_MAP_TYPE = 0x0f;            // Mask for type of mapping.
+constexpr usize NEUTRON_MAP_FIXED = 0x10;           // Interpret addr exactly.
+constexpr usize NEUTRON_MAP_ANONYMOUS = 0x20;       // Don't use a file.
+constexpr usize NEUTRON_MAP_GROWSDOWN = 0x00100;    // Stack-like segment.
+constexpr usize NEUTRON_MAP_DENYWRITE = 0x00800;    // ETXTBSY.
+constexpr usize NEUTRON_MAP_EXECUTABLE = 0x01000;   // Mark it as an executable.
+constexpr usize NEUTRON_MAP_LOCKED = 0x02000;       // Lock the mapping.
+constexpr usize NEUTRON_MAP_NORESERVE = 0x04000;    // Don't check for reservations.
 constexpr usize NEUTRON_MAP_POPULATE = 0x08000;     // Populate (prefault) pagetables.
 constexpr usize NEUTRON_MAP_NONBLOCK = 0x10000;     // Do not block on IO.
-constexpr usize NEUTRON_MAP_STACK = 0x20000;     // Allocation is for a stack.
-constexpr usize NEUTRON_MAP_HUGETLB = 0x40000;     // Create huge page mapping.
-constexpr usize NEUTRON_MAP_SYNC = 0x80000;     // Perform synchronous page faults for the mapping.
-constexpr usize NEUTRON_MAP_FIXED_NOREPLACE = 0x100000;    // MAP_FIXED but do not unmap
+constexpr usize NEUTRON_MAP_STACK = 0x20000;        // Allocation is for a stack.
+constexpr usize NEUTRON_MAP_HUGETLB = 0x40000;      // Create huge page mapping.
+constexpr usize NEUTRON_MAP_SYNC = 0x80000;         // Perform synchronous page faults
+constexpr usize NEUTRON_MAP_FIXED_NOREPLACE = 0x100000; // MAP_FIXED but do not unmap
 // When MAP_HUGETLB is set bits [26:31] encode the log2 of the huge page size.
 constexpr usize NEUTRON_MAP_HUGE_SHIFT = 26;
 constexpr usize NEUTRON_MAP_HUGE_MASK = 0x3f;

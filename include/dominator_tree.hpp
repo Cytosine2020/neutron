@@ -79,12 +79,12 @@ private:
         }
 
         vertex_info.emplace(0, VertexInfo{
-                .index = 1,
-                .label = 1,
-                .parent = 0,
-                .ancestor = 0,
-                .semi = 0,
-                .idom = 0});
+               /* index */ 1,
+               /* label */ 1,
+               /* parent */ 0,
+               /* ancestor */ 0,
+               /* semi */ 0,
+               /* idom */ 0});
 
         std::vector<std::pair<VertexPtr, VertexIter>> stack{
             {start, get_relate_vertex<!post>(start).begin()}
@@ -102,12 +102,12 @@ private:
                     usize predecessor = vertex_info[back.first.get_vertex()].index;
 
                     vertex_info.emplace(current_vertex, VertexInfo{
-                            .index = current,
-                            .label = current,
-                            .parent = predecessor,
-                            .ancestor = 0,
-                            .semi = predecessor,
-                            .idom = predecessor});
+                           /* index */ current,
+                           /* label */ current,
+                           /* parent */ predecessor,
+                           /* ancestor */ 0,
+                           /* semi */ predecessor,
+                           /* idom */ predecessor});
 
                     stack.emplace_back(back.first, back.second);
 

@@ -105,7 +105,7 @@ public:
             SuperT{hart_id, mem.pc, mem.int_reg}, pcb{mem}, execute_cache{0, 0, nullptr},
             load_cache{0, 0, nullptr}, store_cache{0, 0, nullptr},
             debug_stream{debug_stream}, debug{debug} {
-        this->cur_level = riscv_isa::USER_MODE;
+        this->cur_level = riscv_isa::PrivilegeLevel::USER_MODE;
     }
 
     void invalid_cache() {
@@ -119,7 +119,7 @@ public:
         if (load_cache.start <= addr && addr + sizeof(ValT) <= load_cache.end) {
             return reinterpret_cast<ValT *>(load_cache.shift + addr);
         } else {
-            auto area = pcb.get_memory_area(addr, riscv_isa::READ);
+            auto area = pcb.get_memory_area(addr, riscv_isa::MemoryProtection::READ);
             if (area.start == 0) {
                 return nullptr;
             } else {
@@ -134,7 +134,7 @@ public:
         if (store_cache.start <= addr && addr + sizeof(ValT) <= store_cache.end) {
             return reinterpret_cast<ValT *>(store_cache.shift + addr);
         } else {
-            auto area = pcb.get_memory_area(addr, riscv_isa::READ_WRITE);
+            auto area = pcb.get_memory_area(addr, riscv_isa::MemoryProtection::READ_WRITE);
             if (area.start == 0) {
                 return nullptr;
             } else {
@@ -149,7 +149,7 @@ public:
         if (execute_cache.start <= addr && addr + sizeof(ValT) <= execute_cache.end) {
             return reinterpret_cast<ValT *>(execute_cache.shift + addr);
         } else {
-            auto area = pcb.get_memory_area(addr, riscv_isa::EXECUTE);
+            auto area = pcb.get_memory_area(addr, riscv_isa::MemoryProtection::EXECUTE);
             if (area.start == 0) {
                 return nullptr;
             } else {
@@ -727,7 +727,7 @@ public:
 
         // todo: not implement
 
-        i32 *host_uaddr = pcb.template address<i32>(uaddr, riscv_isa::READ_WRITE);
+        i32 *host_uaddr = pcb.template address<i32>(uaddr, riscv_isa::MemoryProtection::READ_WRITE);
 
         switch (futex_op) {
             case NEUTRON_FUTEX_WAIT_PRIVATE:
@@ -803,8 +803,8 @@ public:
                    std::min(sizeof(guest_buf.release), sizeof(host_buf.release)));
             memcpy(guest_buf.version, host_buf.version,
                    std::min(sizeof(guest_buf.version), sizeof(host_buf.version)));
-            memcpy(guest_buf.machine, pcb.platform_string,
-                   std::min(sizeof(guest_buf.machine), sizeof(pcb.platform_string)));
+            memcpy(guest_buf.machine, pcb.platform_string(),
+                   std::min(sizeof(guest_buf.machine), strlen(pcb.platform_string())));
 
             if (!pcb.memory_copy_to_guest(buf, &guest_buf, sizeof(guest_buf))) {
                 ret = -EFAULT;

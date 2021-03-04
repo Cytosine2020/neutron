@@ -29,7 +29,7 @@ public:
 
     LinuxGDBCore(UXLenT hart_id, LinuxProgram<xlen> &mem,
                  bool debug = false, std::ostream &debug_stream = std::cout) :
-            SuperT{hart_id, mem, debug, debug_stream}, gdb{false} {}
+            SuperT{hart_id, mem, debug, debug_stream}, gdb{true} {}
 
     bool gdb_handler() {
         while (true) {
